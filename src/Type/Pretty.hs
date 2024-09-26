@@ -234,26 +234,27 @@ instance Show DataInfo where
   show = show . pretty
 
 instance Pretty DataInfo where
-  pretty = ppDataInfo Type.Pretty.defaultEnv True False
+  pretty = ppDataInfo Type.Pretty.defaultEnv True
 
-ppDataInfo env showBody isExtend dataInfo
-  = prettyDataInfo env showBody False isExtend dataInfo
+ppDataInfo env showBody dataInfo
+  = prettyDataInfo env showBody False dataInfo
 
 
 commaSep = hsep . punctuate comma
 
 
-prettyDataInfo env0 showBody publicOnly isExtend info@(DataInfo datakind name kind args cons range datadef dataEff vis doc)
+prettyDataInfo env0 showBody publicOnly info@(DataInfo datakind name kind args cons range datadef dataEff isRec vis doc)
   = if (publicOnly && isPrivate vis) then empty else
     (prettyComment env0 doc $
       (if publicOnly then empty else ppVis env0 vis) <.>
       let env = env0{ nice = niceTypeExtendVars (args) (nice env0) } in
-      (if isExtend then keyword env "extend "
-        else case datadef of
-               DataDefRec     -> keyword env "recursive "
-               DataDefOpen    -> keyword env "open "
-               DataDefValue v -> keyword env ("value" ++ show v ++ " ")
-               _ -> empty) <.>
+      (if isRec then keyword env "recursive " else text "") <.>
+      (case datadef of
+          -- DataDefRec     -> keyword env "recursive "
+          DataDefOpen isExtend -> keyword env (if isExtend then "extend " else "open ")
+          DataDefValue v -> keyword env ("value" ++ show v ++ " ")
+          DataDefLazy    -> keyword env "lazy "
+          _ -> empty) <.>
       (case dataEff of
          DataNoEffect -> empty
          DataEffect named linear -> (if named then keyword env "named " else empty) <.>
@@ -272,10 +273,11 @@ prettyDataInfo env0 showBody publicOnly isExtend info@(DataInfo datakind name ki
         else empty))
 
 prettyConInfo env0 publicOnly (ConInfo conName ntname foralls exists fields scheme sort range paramRanges paramVis singleton
-                                      orderedFields vrepr vis doc)
+                                      orderedFields vrepr isLazy tag vis doc)
   = if (publicOnly && isPrivate vis) then empty else
     (prettyComment env0 doc $
       (if publicOnly then empty else ppVis env0 vis) <.>
+      (if isLazy then keyword env0 "lazy " else empty) <.>
       keyword env0 "con" <+>
       ppName env0 conName <.> pretty range <.>
       (if null exists then empty else (angled (map (ppTypeVar env) exists))) <.>
@@ -283,7 +285,8 @@ prettyConInfo env0 publicOnly (ConInfo conName ntname foralls exists fields sche
         then empty
         else parens (commaSep (map (ppField env) (zip paramVis fields)))) <.>
       (text (show vrepr))
-      <+> text ":" <+> ppType env scheme <.> semi)
+      <+> text ":" <+> ppType env scheme
+      <+> text "=" <+> pretty tag <.> semi)
   where
     ppField env (fvis,(name,tp))
       = -- (if (fvis /= vis) then ppVis env fvis else empty) <.>

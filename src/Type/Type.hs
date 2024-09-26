@@ -13,7 +13,7 @@ module Type.Type (-- * Types
                     Type(..), Scheme, Sigma, Rho, Tau, Effect, InferType, Pred(..)
                   , Flavour(..)
                   , DataInfo(..), DataKind(..), ConInfo(..), SynInfo(..)
-                  , dataInfoIsRec, dataInfoIsOpen, dataInfoIsLiteral
+                  , dataInfoIsOpen, dataInfoIsExtend, dataInfoIsLiteral
                   , conInfoSize, conInfoScanCount
                   , eqType, eqTypes, elemType
                   -- Predicates
@@ -176,15 +176,16 @@ data DataInfo = DataInfo{ dataInfoSort    :: !DataKind
                         , dataInfoParams  :: ![TypeVar] {- ^ arguments -}
                         , dataInfoConstrs :: ![ConInfo]
                         , dataInfoRange   :: !Range
-                        , dataInfoDef     :: !DataDef  -- value(raw,scan), normal, lazy, rec(=div), open, linear
+                        , dataInfoDef     :: !DataDef  -- value(raw,scan), normal, lazy, open, linear
                         , dataInfoEffect  :: !DataEffect
+                        , dataInfoIsRec   :: !Bool     -- recursive datatype?
                         , dataInfoVis     :: !Visibility
                         , dataInfoDoc     :: !String
                         }
 
 
-dataInfoIsRec info
-  = dataDefIsRec (dataInfoDef info)
+dataInfoIsExtend info
+  = dataDefIsExtend (dataInfoDef info)
 
 dataInfoIsOpen info
   = dataDefIsOpen (dataInfoDef info)
@@ -208,6 +209,8 @@ data ConInfo = ConInfo{ conInfoName :: !Name
                       , conInfoSingleton :: !Bool -- ^ is this the only constructor of this type?
                       , conInfoOrderedParams :: ![(Name,Type)] -- ^ fields ordered by size
                       , conInfoValueRepr :: !ValueRepr
+                      , conInfoIsLazy :: !Bool     -- also True for indirection nodes
+                      , conInfoTag :: !Int
                       , conInfoVis :: !Visibility
                       , conInfoDoc :: !String
                       }

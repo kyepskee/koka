@@ -141,11 +141,12 @@ hasTagField _              = False
 genTypeDef :: TypeDef -> Asm ()
 genTypeDef (Synonym synInfo)
   = return ()
-genTypeDef (Data info isExtend)
+genTypeDef (Data info)
   = onTopLevel $
     do -- generate the type constructor
        ctx <- getModule
        putLn $ text "// type" <+> pretty (dataInfoName info)
+       let isExtend = dataInfoIsExtend info
        case getDataRepr info of
          (DataEnum,_)
            -> do putLn (ppVis (dataInfoVis info) <+> text "enum" <+> ppDefName (typeClassName (dataInfoName info)) <+>

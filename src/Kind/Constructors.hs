@@ -17,7 +17,7 @@ module Kind.Constructors( -- * Constructors
                           , constructorsFindScheme
                           , constructorsSet, constructorsList
                           , constructorsCompose, constructorsFromList
-                          , extractConstructors                          
+                          , extractConstructors
                             -- * Pretty
                           , ppConstructors
                           ) where
@@ -113,7 +113,7 @@ extractTypeDefGroup isVisible (Core.TypeDefGroup tdefs)
 extractTypeDef :: (Visibility -> Bool) -> Core.TypeDef -> M.NameMap ConInfo
 extractTypeDef isVisible tdef
   = case tdef of
-      Core.Data dataInfo isExtend | isVisible (dataInfoVis dataInfo)
+      Core.Data dataInfo | isVisible (dataInfoVis dataInfo)
         -> let conInfos = dataInfoConstrs dataInfo
            in M.fromList [(conInfoName conInfo,conInfo) | (conInfo) <-  conInfos, isVisible (conInfoVis conInfo)]
       _ -> M.empty

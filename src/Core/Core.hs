@@ -156,7 +156,7 @@ patExprBool name tag
   = let tname   = TName name typeBool
         conEnum = ConEnum nameTpBool DataEnum valueReprZero tag
         conInfo = ConInfo name nameTpBool [] [] [] (TFun [] typeTotal typeBool) Inductive rangeNull [] [] False
-                            [] valueReprZero Public ""
+                            [] valueReprZero False tag Public ""
         pat = PatCon tname [] conEnum [] [] typeBool conInfo False
         expr = Con tname conEnum
     in (pat,expr)
@@ -365,19 +365,19 @@ type TypeDefs = [TypeDef]
 -- | A type definition
 data TypeDef =
     Synonym{ typeDefSynInfo :: !SynInfo }             -- ^ name, synonym info, and the visibility
-  | Data{ typeDefDataInfo :: !DataInfo, typeDefIsExtend :: !Bool }  -- ^ name, info, visibility, and the visibilities of the constructors, the isExtend is true if this is an extension of the datatype.
+  | Data{ typeDefDataInfo :: !DataInfo }  -- ^ name, info, visibility, and the visibilities of the constructors
 
 typeDefName (Synonym info) = synInfoName info
-typeDefName (Data info _)  = dataInfoName info
+typeDefName (Data info)    = dataInfoName info
 
-typeDefIsExtension (Data _  True) = True
-typeDefIsExtension _              = False
+typeDefIsExtension (Data di) = dataDefIsExtend (dataInfoDef di)
+typeDefIsExtension _         = False
 
 typeDefVis (Synonym info) = synInfoVis info
-typeDefVis (Data info _)  = dataInfoVis info
+typeDefVis (Data info)    = dataInfoVis info
 
 typeDefDoc (Synonym info) = synInfoDoc info
-typeDefDoc (Data info _)  = dataInfoDoc info
+typeDefDoc (Data info)    = dataInfoDoc info
 
 flattenTypeDefGroups :: TypeDefGroups -> [TypeDef]
 flattenTypeDefGroups tdgs = concatMap (\(TypeDefGroup tdg) -> tdg) tdgs
@@ -407,7 +407,7 @@ data ConRepr  = ConEnum{   conTypeName :: !Name, conDataRepr :: !DataRepr, conVa
               | ConAsJust{ conTypeName :: !Name, conDataRepr :: !DataRepr, conValRepr :: !ValueRepr, conAsNothing :: !Name, conTag :: !Int } -- constructor is the just node of a maybe-like datatype  (only use for DataAsMaybe, not for DataStructAsMaybe)
               | ConStruct{ conTypeName :: !Name, conDataRepr :: !DataRepr, conValRepr :: !ValueRepr, conTag :: !Int }      -- constructor as value type
               | ConAsCons{ conTypeName :: !Name, conDataRepr :: !DataRepr, conValRepr :: !ValueRepr, conAsNil :: !Name, conCtxPath :: !CtxPath, conTag :: !Int } -- constructor is the cons node of a list-like datatype  (may have one or more fields)
-              | ConOpen  { conTypeName :: !Name, conDataRepr :: !DataRepr, conValRepr :: !ValueRepr, conCtxPath :: !CtxPath }                     -- constructor of open data type
+              | ConOpen  { conTypeName :: !Name, conDataRepr :: !DataRepr, conValRepr :: !ValueRepr, conCtxPath :: !CtxPath, conTag :: !Int }                     -- constructor of open data type
               | ConNormal{ conTypeName :: !Name, conDataRepr :: !DataRepr, conValRepr :: !ValueRepr, conCtxPath :: !CtxPath, conTag :: !Int }      -- a regular constructor
               deriving (Eq,Ord,Show)
 
@@ -496,13 +496,13 @@ getDataReprEx :: (DataInfo -> Bool) -> DataInfo -> (DataRepr,[ConRepr])
 getDataReprEx getIsValue info
   = let typeName  = dataInfoName info
         conInfos = dataInfoConstrs info
-        conTags  = [0..length conInfos - 1]
+        conTags  = map conInfoTag conInfos
         singletons =  filter (\con -> null (conInfoParams con)) conInfos
         hasExistentials = any (\con -> not (null (conInfoExists con))) conInfos
         isValue = getIsValue info && not (dataInfoIsRec info)
         (dataRepr,conReprFuns) =
          if (dataInfoIsOpen(info))
-          then (DataOpen, map (\conInfo conTag -> ConOpen typeName DataOpen (conInfoValueRepr conInfo) CtxNone) conInfos)
+          then (DataOpen, map (\conInfo conTag -> ConOpen typeName DataOpen (conInfoValueRepr conInfo) CtxNone conTag) conInfos)
          -- TODO: only for C#? check this during kind inference?
          -- else if (hasExistentials)
          --  then (DataNormal, map (\con -> ConNormal typeName) conInfos)
@@ -561,7 +561,7 @@ getDataReprEx getIsValue info
                                   else ConNormal typeName dataRepr (conInfoValueRepr ci) CtxNone) conInfos
                    )
          )
-      in (dataRepr, [conReprFun tag | (conReprFun,tag) <- zip conReprFuns [1..]])
+      in (dataRepr, [conReprFun tag | (conReprFun,tag) <- zip conReprFuns conTags])
 
 
 {--------------------------------------------------------------------------
@@ -1350,7 +1350,7 @@ coreDependencies (Core{coreProgName = mname, coreProgImports = imports, coreProg
 
 depTDef :: TypeDef -> Deps
 depTDef (Synonym info) = depType (synInfoType info)
-depTDef (Data info _)  = depsUnions (map (depType . conInfoType) (dataInfoConstrs info))
+depTDef (Data info)    = depsUnions (map (depType . conInfoType) (dataInfoConstrs info))
 
 depType :: Type -> Deps
 depType tp

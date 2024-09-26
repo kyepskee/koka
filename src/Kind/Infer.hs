@@ -27,7 +27,7 @@ import Debug.Trace
 
 import Data.Char(isAlphaNum)
 import Data.List(groupBy,intersperse,nubBy,sortOn,partition)
-import Data.Maybe(catMaybes)
+import Data.Maybe(catMaybes,isJust)
 import Control.Monad(when)
 
 import Lib.PPrint
@@ -137,8 +137,8 @@ extractInfos groups
     extractGroupInfos (Core.TypeDefGroup ctdefs)
       = map extractInfo ctdefs
 
-    extractInfo (Core.Synonym synInfo )         = Left synInfo
-    extractInfo (Core.Data dataInfo isExtend)   = Right dataInfo
+    extractInfo (Core.Synonym synInfo )  = Left synInfo
+    extractInfo (Core.Data dataInfo)     = Right dataInfo
 
 {---------------------------------------------------------------
 
@@ -149,9 +149,9 @@ synTypeDefGroup modName (Core.TypeDefGroup ctdefs)
 
 synTypeDef :: Name -> Core.TypeDef -> DefGroups Type
 synTypeDef modName (Core.Synonym synInfo) = []
-synTypeDef modName (Core.Data dataInfo isExtend) | isHiddenName (dataInfoName dataInfo) = []
-synTypeDef modName (Core.Data dataInfo isExtend)
-  = (if not (dataInfoIsOpen dataInfo) && not isExtend then synAccessors modName dataInfo else [])
+synTypeDef modName (Core.Data dataInfo) | isHiddenName (dataInfoName dataInfo) = []
+synTypeDef modName (Core.Data dataInfo)
+  = (if not (dataInfoIsOpen dataInfo) then synAccessors modName dataInfo else [])
     ++
     (if (length (dataInfoConstrs dataInfo) == 1 && not (dataInfoIsOpen dataInfo)
          && not (isHiddenName (conInfoName (head (dataInfoConstrs dataInfo))))
@@ -381,7 +381,7 @@ bindTypeDef tdef -- extension
   where
     isExtend =
       case tdef of
-        (DataType newtp args constructors range vis sort ddef dataEff isExtend doc) -> isExtend
+        (DataType newtp args constructors range vis sort ddef dataEff doc) -> dataDefIsExtend ddef
         _ -> False
 
 bindTypeBinder :: TypeBinder UserKind -> KInfer (TypeBinder InfKind)
@@ -670,16 +670,16 @@ infTypeDef (tbinder, Synonym syn args tp range vis doc)
        tbinder' <- unifyBinder tbinder syn range infgamma kind
        return (Synonym tbinder' infgamma tp' range vis doc)
 
-infTypeDef (tbinder, td@(DataType newtp args constructors range vis sort ddef dataEff isExtend doc))
+infTypeDef (tbinder, td@(DataType newtp args constructors range vis sort ddef dataEff doc))
   = do infgamma <- mapM bindTypeBinder args
        constructors' <- extendInfGamma infgamma (mapM infConstructor constructors)
        -- todo: unify extended datatype kind with original
        reskind <- if dataDefIsOpen ddef then return infKindStar else freshKind
        tbinder' <- unifyBinder tbinder newtp range infgamma reskind
-       if not isExtend then return ()
+       if not (dataDefIsExtend ddef) then return ()
         else do (qname,kind,_) <- findInfKind (tbinderName newtp) (tbinderRange newtp)
                 unify (Check "extended type must have the same kind as the open type" (tbinderRange newtp) ) (tbinderRange newtp) (typeBinderKind tbinder') kind
-       return (DataType tbinder' infgamma constructors' range vis sort ddef dataEff isExtend doc)
+       return (DataType tbinder' infgamma constructors' range vis sort ddef dataEff doc)
 
 unifyBinder tbinder defbinder range infgamma reskind
  = do let kind = infKindFunN (map typeBinderKind infgamma) reskind
@@ -815,7 +815,7 @@ infParam expected context (name,tp)
        return (name,tp')
 
 -- Add indirection constructor to a lazy datatype
-addLazyIndirect (DataType newtp targs constructors range vis sort ddef dataEff isExtend doc)
+addLazyIndirect (DataType newtp targs constructors range vis sort ddef dataEff doc)
   | any userConIsLazy constructors || dataDefIsLazy ddef
   = do let (lazyCons,strictCons) = partition userConIsLazy constructors
            rng                 = tbinderNameRange newtp
@@ -840,7 +840,7 @@ addLazyIndirect (DataType newtp targs constructors range vis sort ddef dataEff i
        when (not validDdef) $
          addError rng $ text "Cannot add lazy constructors to a" <+> text (show ddef) <+> text "type"
 
-       return (DataType newtp targs newConstructors range vis sort DataDefLazy dataEff isExtend doc)
+       return (DataType newtp targs newConstructors range vis sort DataDefLazy dataEff doc)
 
 addLazyIndirect td
   = return td
@@ -892,9 +892,9 @@ resolveTypeDef isRec recNames (Synonym syn params tp range vis doc)
     kindArity (KApp (KApp kcon k1) k2)  | kcon == kindArrow = k1 : kindArity k2
     kindArity _ = []
 
-resolveTypeDef isRec recNames (DataType newtp params constructors range vis sort ddef dataEff isExtend doc)
+resolveTypeDef isRec recNames (DataType newtp params constructors range vis sort ddef dataEff doc)
   = do -- trace ("datatype: " ++ show(tbinderName newtp) ++ " " ++ show isExtend ++ ", doc: " ++ doc) $ return ()
-       newtp' <- if isExtend
+       newtp' <- if dataDefIsExtend ddef
                   then do (qname,ikind,_) <- findInfKind (tbinderName newtp) (tbinderRange newtp)
                           kind  <- resolveKind ikind
                           -- addRangeInfo range (Id qname (NITypeCon kind doc) [] False)
@@ -916,7 +916,7 @@ resolveTypeDef isRec recNames (DataType newtp params constructors range vis sort
 
        consinfos <- mapM (resolveConstructor (getName newtp') sort
                             (not (dataDefIsOpen ddef) && length constructors == 1)
-                            typeResult typeVars tvarMap) constructors
+                            typeResult typeVars tvarMap) (zip constructors [1..])  -- constructor tags start at 1
        let (constructors',conInfos0) = unzip consinfos
 
        --check recursion
@@ -944,7 +944,7 @@ resolveTypeDef isRec recNames (DataType newtp params constructors range vis sort
           <- createDataDef emitError emitWarning lookupDataInfo
                 platform qname resultHasKindStar isRec sort extraFields ddef conInfos0
 
-       let dataInfo = DataInfo sort (getName newtp') (typeBinderKind newtp') typeVars conInfos1 range ddef1 dataEff vis doc
+       let dataInfo = DataInfo sort (getName newtp') (typeBinderKind newtp') typeVars conInfos1 range ddef1 dataEff isRec vis doc
 
        assertion ("Kind.Infer.resolveTypeDef: assuming value struct tag but not inferred as such " ++ show (ddef,ddef1))
                  ((willNeedStructTag && Core.needsTagField (fst (Core.getDataRepr dataInfo))) || not willNeedStructTag) $ return ()
@@ -966,7 +966,7 @@ resolveTypeDef isRec recNames (DataType newtp params constructors range vis sort
        let declaration = (if sort /= Inductive then "" else (if dataDefIsValue ddef1 then "value " else "reference "))
                           ++ show sort
        addRangeInfo range (Decl declaration (getName newtp') (mangleTypeName (getName newtp')) Nothing)
-       return (Core.Data dataInfo isExtend)
+       return (Core.Data dataInfo)
   where
     conVis (UserCon name exist params result mblazy rngName rng vis _) = vis
 
@@ -1023,8 +1023,8 @@ resolveKind infkind
     resolve (KICon kind) = kind
     resolve (KIApp k1 k2) = KApp (resolve k1) (resolve k2)
 
-resolveConstructor :: Name -> DataKind -> Bool -> Type -> [TypeVar] -> M.NameMap TypeVar -> UserCon (KUserType InfKind) UserType InfKind -> KInfer (UserCon Type Type Kind, ConInfo)
-resolveConstructor typeName typeSort isSingleton typeResult typeParams idmap (UserCon name exist params mbResult mblazy rngName rng vis doc)
+resolveConstructor :: Name -> DataKind -> Bool -> Type -> [TypeVar] -> M.NameMap TypeVar -> (UserCon (KUserType InfKind) UserType InfKind,Int) -> KInfer (UserCon Type Type Kind, ConInfo)
+resolveConstructor typeName typeSort isSingleton typeResult typeParams idmap (UserCon name exist params mbResult mblazy rngName rng vis doc,tag)
   = do qname  <- qualifyDef name
        exist' <- mapM (resolveTypeBinder doc) exist
        existVars <- mapM (\ename -> freshTypeVar ename Bound) exist'
@@ -1057,7 +1057,7 @@ resolveConstructor typeName typeSort isSingleton typeResult typeParams idmap (Us
                   isSingleton
                   -- orderedFields vrepr
                   [] valueReprZero   -- initialized later at the datadef
-                  vis doc)
+                  (isJust mblazy' || isLazyIndirectConName qname) tag vis doc)
 
 
 ---------------------------------------------------------

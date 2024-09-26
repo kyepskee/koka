@@ -142,7 +142,6 @@ data TypeDef t u k
             , typeDefSort :: !DataKind
             , typeDefDef  :: !DataDef
             , typeDefEffect :: !DataEffect
-            , typeDefIsExtend :: !Bool -- ^ True if this is an extension; the binder contains a qualified id (and is not a declaration)
             , typeDefDoc  :: !String
             }
   deriving (Show)

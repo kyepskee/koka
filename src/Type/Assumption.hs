@@ -366,7 +366,7 @@ extractTypeDefGroup isValue updateVis (Core.TypeDefGroup tdefs)
 extractTypeDef :: (DataInfo -> Bool) -> (Visibility -> Visibility) -> Core.TypeDef -> Gamma
 extractTypeDef isValue updateVis tdef
   = case tdef of
-     Core.Data dataInfo isExtend
+     Core.Data dataInfo
        -> gammaUnions (L.map extractConInfo
             [(conInfo, conRepr) | (conInfo,conRepr) <- zip (dataInfoConstrs dataInfo)
                  (snd (Core.getDataReprEx isValue dataInfo))] )

@@ -212,9 +212,9 @@ prettyTypeDef :: Env -> TypeDef -> Doc
 prettyTypeDef env (Synonym synInfo  )
   = ppSynInfo env False True True synInfo <.> semi
 
-prettyTypeDef env (Data dataInfo isExtend)
+prettyTypeDef env (Data dataInfo)
   = -- keyword env "type" <+> prettyVis env vis <.> ppDataInfo env True dataInfo
-    prettyDataInfo env True False {-public only?-} isExtend dataInfo <.> semi
+    prettyDataInfo env True False {-public only?-} dataInfo <.> semi
 
 prettyDefGroup :: Env -> DefGroup -> Doc
 prettyDefGroup env (DefRec defs)

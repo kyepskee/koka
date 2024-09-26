@@ -160,6 +160,6 @@ extractTypeDef tdef
   = case tdef of
       Core.Synonym synInfo | Core.isPublic (synInfoVis synInfo)
         -> kgammaSingle (synInfoName synInfo) (synInfoKind synInfo) (synInfoDoc synInfo)
-      Core.Data dataInfo False | Core.isPublic (dataInfoVis dataInfo)
+      Core.Data dataInfo | Core.isPublic (dataInfoVis dataInfo) && not (dataInfoIsExtend dataInfo)
         -> kgammaSingle (dataInfoName dataInfo) (dataInfoKind dataInfo) (dataInfoDoc dataInfo)
       _ -> kgammaEmpty

@@ -43,15 +43,11 @@ createDataDef emitError emitWarning lookupDataInfo
            isIso      = canbeValue && maxMembers == 1 && conCount == 1
 
        ddef  <- case defaultDef of
-                  DataDefOpen
-                    -> return DataDefOpen
-                  DataDefRec
-                    -> return DataDefRec
+                  DataDefOpen isExtend
+                    -> return (DataDefOpen isExtend)
                   DataDefLazy
                     -> return DataDefLazy
 
-                  DataDefNormal | isRec
-                    -> return DataDefRec
                   DataDefNormal
                     -> do dd <- createMaxDataDef conInfos
                           case dd of
@@ -61,8 +57,6 @@ createDataDef emitError emitWarning lookupDataInfo
                               -> return dd -}
                             _ -> return DataDefNormal
 
-                  DataDefAuto _ | isRec
-                    -> return DataDefRec
                   DataDefAuto declaredAsStruct
                     -> do dd <- createMaxDataDef conInfos
                           case dd of

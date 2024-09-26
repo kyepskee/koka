@@ -243,7 +243,7 @@ extendKGamma ranges (Core.TypeDefGroup (tdefs)) ki
                                  return (kgamma,tdefs)
       where
         nameKind (Core.Synonym synInfo) = (synInfoName synInfo, synInfoKind synInfo, synInfoDoc synInfo)
-        nameKind (Core.Data dataInfo isExtend)   = (dataInfoName dataInfo, dataInfoKind dataInfo, dataInfoDoc dataInfo)
+        nameKind (Core.Data dataInfo)   = (dataInfoName dataInfo, dataInfoKind dataInfo, dataInfoDoc dataInfo)
 
 
 -- | This extend KGamma does not check for duplicates
@@ -257,7 +257,7 @@ extendKGammaUnsafe (tdefs) (KInfer ki)
   where
     kGamma = kgammaNewNub (map nameKind tdefs) -- duplicates are removed here
     nameKind (Core.Synonym synInfo) = (synInfoName synInfo, synInfoKind synInfo, synInfoDoc synInfo)
-    nameKind (Core.Data dataInfo isExtend)   = (dataInfoName dataInfo, dataInfoKind dataInfo, dataInfoDoc dataInfo)
+    nameKind (Core.Data dataInfo)   = (dataInfoName dataInfo, dataInfoKind dataInfo, dataInfoDoc dataInfo)
 
 
     kSyns  = synonymsNew (concatMap nameSyn tdefs)
@@ -265,8 +265,8 @@ extendKGammaUnsafe (tdefs) (KInfer ki)
     nameSyn _                       = []
 
     kNewtypes  = newtypesNew (concatMap nameNewtype tdefs)
-    nameNewtype (Core.Data dataInfo _ )   = [dataInfo]
-    nameNewtype _                         = []
+    nameNewtype (Core.Data dataInfo)   = [dataInfo]
+    nameNewtype _                      = []
 
 checkExternal :: Name -> Range -> KInfer ()
 checkExternal name range

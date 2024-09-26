@@ -183,10 +183,10 @@ pfixity
 --------------------------------------------------------------------------}
 typeDecl :: Env -> LexParser (TypeDef,Env)
 typeDecl env
-  = do (vis,(ddef,isExtend,dataEff,sort,doc))   <- try $ do vis <- vispub
-                                                            info <- typeSort
-                                                            return (vis,info)
-       tname <- if (isExtend)
+  = do (vis,(ddef,isRec,dataEff,sort,doc))   <- try $ do vis <- vispub
+                                                         info <- typeSort
+                                                         return (vis,info)
+       tname <- if (dataDefIsExtend ddef)
                  then do (name,_) <- qtypeid
                          return name
                  else do (name,_) <- tbinderId
@@ -202,8 +202,8 @@ typeDecl env
        let cons1    = case cons of
                         [con] -> [con{ conInfoSingleton = True }]
                         _     -> cons
-           dataInfo = DataInfo sort tname kind params cons1 range ddef dataEff vis doc
-       return (Data dataInfo isExtend, env)
+           dataInfo = DataInfo sort tname kind params cons1 range ddef dataEff isRec vis doc
+       return (Data dataInfo, env)
   <|>
     do (vis,doc) <- try $ do vis <- vispub
                              (_,doc) <- dockeyword "alias"
@@ -221,20 +221,23 @@ typeDecl env
        return (Synonym synInfo, envExtendSynonym env synInfo)
 
 conDecl tname foralls sort env
-  = do vis <- try $ do vis <- vispub
-                       keyword "con"
-                       return vis
+  = do (vis,isLazy) <- try $ do vis <- vispub
+                                lazy <- option False (do{ keyword "lazy"; return True })
+                                keyword "con"
+                                return (vis,lazy)
        (name,(_,doc)) <- docconid
        range    <- prange env
        -- trace ("core con: " ++ show name) $ return ()
        (env1,existss) <- typeParams env
        (env2,params)  <- parameters env1
        vrepr <- parseValueRepr
-       tp     <- typeAnnot env2
+       tp    <- typeAnnot env2
+       keyword "="
+       (tag,_) <- integer
        let params2 = [(if nameIsNil name then newFieldName i else name, tp) | ((name,tp),i) <- zip params [1..]]
            orderedFields = []  -- no need to reconstruct as it is only used during codegen?
        let con = (ConInfo (qualify (modName env) name) tname foralls existss params2 tp sort range (map (const range) params2) (map (const Public) params2) False
-                             orderedFields vrepr vis doc)
+                             orderedFields vrepr isLazy (fromInteger tag) vis doc)
        -- trace (show con ++ ": " ++ show params2) $
        return con
 
@@ -242,25 +245,23 @@ conDecl tname foralls sort env
 typeSort :: LexParser (DataDef, Bool, DataEffect, DataKind,String)
 typeSort
   = do isRecursive <- do{ specialId "recursive"; return True } <|> return False
-       (ddef0,isExtend,sort,dataEff) <- parseTypeMod
+       (ddef,sort,dataEff) <- parseTypeMod
        (_,doc) <- dockeyword "type"
-       let ddef = case (isRecursive, ddef0) of
-                    (True,ddef) | dataDefIsNormal ddef -> DataDefRec
-                    _ -> ddef0
-       return (ddef,isExtend,dataEff,sort,doc)
+       return (ddef,isRecursive,dataEff,sort,doc)
 
-parseTypeMod :: LexParser (DataDef,Bool,DataKind,DataEffect)
+parseTypeMod :: LexParser (DataDef,DataKind,DataEffect)
 parseTypeMod
- =   do{ specialId "open"; return (DataDefOpen, False, Inductive, DataNoEffect) }
- <|> do{ specialId "extend"; return (DataDefOpen, True, Inductive, DataNoEffect) }
+ =   do{ specialId "open"; return (DataDefOpen False, Inductive, DataNoEffect) }
+ <|> do{ specialId "extend"; return (DataDefOpen True, Inductive, DataNoEffect) }
+ <|> do{ specialId "lazy"; return (DataDefLazy, Inductive, DataNoEffect) }
  <|> do specialId "value"
         vrepr <- parseValueRepr
-        return (DataDefValue vrepr, False, Inductive, DataNoEffect)
+        return (DataDefValue vrepr, Inductive, DataNoEffect)
  <|> do dataEff <- parseDataEffect
         (
-              do{ specialId "co"; return (DataDefNormal, False, CoInductive, dataEff) }
-          <|> do{ specialId "div"; return (DataDefNormal, False, Retractive, dataEff) }
-          <|> return (DataDefNormal, False, Inductive, dataEff))
+              do{ specialId "co"; return (DataDefNormal, CoInductive, dataEff) }
+          <|> do{ specialId "div"; return (DataDefNormal, Retractive, dataEff) }
+          <|> return (DataDefNormal, Inductive, dataEff))
  <?> ""
 
 parseDataEffect :: LexParser DataEffect

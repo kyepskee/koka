@@ -109,8 +109,8 @@ genDoc env kgamma gamma core p
     sizeOf (tdef,ds)
       = length ds +
         case tdef of
-          Data info _  -> length (dataInfoConstrs info)
-          _            -> 1
+          Data info  -> length (dataInfoConstrs info)
+          _          -> 1
 
 
     (publicImports,privateImports)
@@ -159,7 +159,7 @@ genDoc env kgamma gamma core p
 
         typeDefTCon tdef
           = case tdef of
-              (Data info _)   -> TypeCon (dataInfoName info) (dataInfoKind info) -- todo: handle exten
+              (Data info)     -> TypeCon (dataInfoName info) (dataInfoKind info) -- todo: handle exten
               (Synonym info)  -> TypeCon (synInfoName info) (synInfoKind info)
 
     sortDefs ds
@@ -186,8 +186,8 @@ genDoc env kgamma gamma core p
       where
         getTDef (TypeDefGroup ts) = ts
 
-        filterCon (Data info isExtend)
-          = Data (info{ dataInfoConstrs = sortOn conInfoName [cons | (cons) <- (dataInfoConstrs info), isPublic (conInfoVis cons)]}) isExtend
+        filterCon (Data info)
+          = Data (info{ dataInfoConstrs = sortOn conInfoName [cons | (cons) <- (dataInfoConstrs info), isPublic (conInfoVis cons)]})
         filterCon other
           = other
 
@@ -307,7 +307,7 @@ fmtTypeDefTOC  (Synonym info, defs)
     map (fmtDefTOC True) defs
 
 
-fmtTypeDefTOC (Data info@DataInfo{ dataInfoSort = Inductive, dataInfoConstrs = [conInfo] } isExtend, defs)  | conInfoName conInfo == dataInfoName info
+fmtTypeDefTOC (Data info@DataInfo{ dataInfoSort = Inductive, dataInfoConstrs = [conInfo] }, defs)  | conInfoName conInfo == dataInfoName info
   -- struct
   = [doctag "li" "" $
      (doctag "a" ("link\" href=\"#" ++ linkEncode (nameLocal (mangleTypeName (dataInfoName info)))) $
@@ -315,7 +315,7 @@ fmtTypeDefTOC (Data info@DataInfo{ dataInfoSort = Inductive, dataInfoConstrs = [
      ++
     map (fmtDefTOC True) defs
 
-fmtTypeDefTOC (Data info isExtend, defs)  -- todo: handle extend
+fmtTypeDefTOC (Data info, defs)  -- todo: handle extend
   = [doctag "li" "" $
      (doctag "a" ("link\" href=\"#" ++ linkEncode (nameLocal (mangleTypeName (dataInfoName info)))) $
       cspan "keyword" (if (hasKindLabelResult (dataInfoKind info)) then "effect" else show (dataInfoSort info))
@@ -407,7 +407,7 @@ fmtTypeDef env kgamma gamma (Synonym info, defs)
    where
       (fmtTp:fmtTVars) = showTypes env kgamma gamma (synInfoType info : map TVar (synInfoParams info))
 
-fmtTypeDef env kgamma gamma (Data info@DataInfo{ dataInfoSort = Inductive, dataInfoConstrs = [conInfo] } isExtend, defs)  | conInfoName conInfo == dataInfoName info
+fmtTypeDef env kgamma gamma (Data info@DataInfo{ dataInfoSort = Inductive, dataInfoConstrs = [conInfo] }, defs)  | conInfoName conInfo == dataInfoName info
   -- struct
   = nestedDecl defs $
     doctag "div" ("decl\" id=\"" ++ linkEncode (nameLocal (mangleTypeName (dataInfoName info)))) $
@@ -430,7 +430,7 @@ fmtTypeDef env kgamma gamma (Data info@DataInfo{ dataInfoSort = Inductive, dataI
 
 
 
-fmtTypeDef env kgamma gamma (Data info isExtend, defs) -- TODO: show extend correctly
+fmtTypeDef env kgamma gamma (Data info, defs) -- TODO: show extend correctly
   = nestedDecl defs $
     doctag "div" ("decl\" id=\"" ++ linkEncode (nameLocal (mangleTypeName (dataInfoName info)))) $
     concat
@@ -438,7 +438,7 @@ fmtTypeDef env kgamma gamma (Data info isExtend, defs) -- TODO: show extend corr
         concat
         [ doctag "span" "def" $
             cspan "keyword" dataInfo ++ "&nbsp;"
-            ++ cspan "type" (signature env isExtend True "kind" (dataInfoName info) (mangleTypeName (dataInfoName info)) (showKind env (dataInfoKind info)) -- atag (linkToSource (dataInfoName info))
+            ++ cspan "type" (signature env (dataInfoIsExtend info) True "kind" (dataInfoName info) (mangleTypeName (dataInfoName info)) (showKind env (dataInfoKind info)) -- atag (linkToSource (dataInfoName info))
                              (cspan "type" (niceTypeName (dataInfoName info))))
         , cspan "type" $ angled (fmtTVars)
         --, "&nbsp;", span "keyword" ":", "&nbsp;", showKind env' (dataInfoKind info)
@@ -454,7 +454,7 @@ fmtTypeDef env kgamma gamma (Data info isExtend, defs) -- TODO: show extend corr
     dataInfo = if (hasKindLabelResult (dataInfoKind info))
                 then "effect"
                 else (show (dataInfoSort info) ++
-                       (if (isExtend) then "&nbsp;extend"
+                       (if (dataInfoIsExtend info) then "&nbsp;extend"
                         else if (dataInfoIsOpen info) then "&nbsp;open"
                         else ""))
 

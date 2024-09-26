@@ -20,7 +20,7 @@ module Common.Syntax( Visibility(..)
                     , Target(..), CTarget(..), JsTarget(..), isTargetC, isTargetJS, isTargetWasm
                     , isPublic, isPrivate
                     , DataDef(..)
-                    , dataDefIsRec, dataDefIsOpen, dataDefIsValue, dataDefSize, dataDefIsNormal, dataDefIsLazy
+                    , dataDefIsOpen, dataDefIsExtend, dataDefIsValue, dataDefSize, dataDefIsNormal, dataDefIsLazy
                     , DataEffect(..)
                     , ValueRepr(..)
                     , valueReprIsMixed, valueReprIsRaw, valueReprNew, valueReprZero
@@ -208,9 +208,8 @@ instance Show DataKind where
 data DataDef = DataDefValue !ValueRepr  -- value type
              | DataDefNormal            -- reference type
              | DataDefLazy              -- lazy reference type
-             | DataDefEffect{ dataDefIsLinear :: !Bool, dataDefIsNamed :: !Bool }  -- effect types
-             | DataDefRec
-             | DataDefOpen
+             -- | DataDefEffect{ dataDefIsLinear :: !Bool, dataDefIsNamed :: !Bool }  -- effect types
+             | DataDefOpen{ isExtend :: !Bool }
              | DataDefAuto{ dataDefDeclaredAsStruct :: !Bool }  -- value or reference type: determined by kind inference in (Kind/Repr.hs:createDataDef)
              deriving Eq
 
@@ -219,19 +218,19 @@ instance Show DataDef where
               DataDefValue v   -> "value" ++ show v
               DataDefNormal    -> "reference"
               DataDefLazy      -> "lazy"
-              DataDefRec       -> "div"       -- retractive type
-              DataDefOpen      -> "open"
+              DataDefOpen isExtend -> if isExtend then "extend" else "open"
               DataDefAuto isStruct -> "auto" ++ (if isStruct then " struct" else "")
+              -- DataDefEffect linear named -> (if linear then "linear " else "") ++ (if named then "named " else "") ++ "effect"
 
-dataDefIsRec ddef
+dataDefIsExtend :: DataDef -> Bool
+dataDefIsExtend ddef
   = case ddef of
-      DataDefOpen  -> True
-      DataDefRec   -> True
-      _            -> False
+      DataDefOpen isExtend -> isExtend
+      _  -> False
 
 dataDefIsOpen ddef
   = case ddef of
-      DataDefOpen -> True
+      DataDefOpen{} -> True
       _ -> False
 
 dataDefIsValue ddef

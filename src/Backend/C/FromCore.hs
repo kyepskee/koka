@@ -440,7 +440,7 @@ genTypeDefGroup (TypeDefGroup tds)
 genTypeDefPre :: TypeDef -> Asm ()
 genTypeDefPre (Synonym synInfo)
   = return ()
-genTypeDefPre (Data info isExtend)
+genTypeDefPre (Data info)
   = do -- generate the type constructor
        emitToH $ linebreak <.> text ("// " ++ if (dataInfoIsValue info) then "value type" else "type") <+> pretty (dataInfoName info)
        let (dataRepr,conReprs) = getDataRepr info
@@ -463,7 +463,7 @@ genTypeDefPre (Data info isExtend)
                                    then ppName (dataInfoName info) <.> text "_empty"
                                    else vcat (punctuate comma (map ppEnumCon (zip (dataInfoConstrs info) conReprs)))) <.> semi <->
                            text "typedef" <+> text enumIntTp <+> ppName (typeClassName (dataInfoName info)) <.> semi <.> linebreak
-        else if (dataReprIsValue dataRepr || isExtend) then return ()
+        else if (dataReprIsValue dataRepr || dataInfoIsExtend info) then return ()
           else emitToH $ ppVis (dataInfoVis info) <.> text "struct" <+> ppName (typeClassName name) <.> text "_s" <+>
                          block (vcat ([text "kk_block_t _block;"] ++
                                       (if (dataRepr /= DataOpen) then [] else [text "kk_string_t _tag;"])
@@ -477,7 +477,7 @@ genTypeDefPre (Data info isExtend)
 genTypeDefPost:: TypeDef -> Asm ()
 genTypeDefPost (Synonym synInfo)
   = return ()
-genTypeDefPost (Data info isExtend)
+genTypeDefPost (Data info)
   = do -- generate the type constructor
        -- emitToH $ linebreak <.> text ("// " ++ if (dataInfoIsValue info) then "value type" else "type") <+> pretty (dataInfoName info)
        let (dataRepr,conReprs) = getDataRepr info
@@ -505,7 +505,7 @@ genTypeDefPost (Data info isExtend)
         else mapM_ (genConstructorType info dataRepr) conInfos
 
        -- wrap up the type definition
-       if (dataRepr == DataOpen && not isExtend)
+       if (dataRepr == DataOpen && not (dataInfoIsExtend info))
         then {- do let openTag = text "tag_t" <+> openTagName name
                 emitToH $ text "extern" <+> openTag <.> semi
                 emitToC $ openTag <+> text "= 0;" -}
@@ -535,7 +535,7 @@ genTypeDefPost (Data info isExtend)
        mapM_ (genConstructorTest info dataRepr) sconInfos
 
        -- generate functions for the data type
-       when (not isExtend) $
+       when (not (dataInfoIsExtend info)) $
          do genDupDrop (typeClassName name) info dataRepr sconInfos
             genBoxUnbox name info dataRepr
   where

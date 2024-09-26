@@ -138,7 +138,7 @@ genModule buildType mbMain imports core
                           f (DefNonRec x) = [defName x]
                       in map unqualify $ concatMap f (coreProgDefs core)
     exportedConstrs = let f (Synonym _ )    = []
-                          f (Data info _)   = map conInfoName $ -- filter (isPublic . conInfoVis)  -- export all for inlined defs
+                          f (Data info)     = map conInfoName $ -- filter (isPublic . conInfoVis)  -- export all for inlined defs
                                                                 (dataInfoConstrs info)
                           u (TypeDefGroup xs) = xs
                       in map unqualify $ concatMap f $ concatMap u (coreProgTypeDefs core)
@@ -257,7 +257,7 @@ genTypeDefGroup (TypeDefGroup tds)
 genTypeDef ::TypeDef -> Asm Doc
 genTypeDef  (Synonym {})
   = return empty
-genTypeDef (Data info isExtend)
+genTypeDef (Data info)
   = do modName <- getModule
        let (dataRepr, conReprs) = getDataRepr info
        docs <- mapM ( \(c,repr)  ->

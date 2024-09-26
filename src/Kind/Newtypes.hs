@@ -91,7 +91,7 @@ extractTypeDefGroup (Core.TypeDefGroup tdefs)
 extractTypeDef :: Core.TypeDef -> [DataInfo]
 extractTypeDef tdef
   = case tdef of
-      Core.Data dataInfo False {-is extend?-}
+      Core.Data dataInfo
         -> [dataInfo]
       _ -> []
 
@@ -111,5 +111,5 @@ instance Pretty Newtypes where
 ppNewtypes showOptions (Newtypes m)
     = vcat [fill 8 (pretty name) <.> colon <+>
             -- text "rank" <+> pretty rank <.> colon <+>
-            ppDataInfo defaultEnv True False dataInfo
+            ppDataInfo defaultEnv True dataInfo
            | (name,dataInfo) <- L.sortBy (\(n1,_) (n2,_) -> compare (show n1) (show n2)) $ M.toList m]

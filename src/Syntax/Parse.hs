@@ -623,7 +623,7 @@ typeDecl dvis
   = dataTypeDecl dvis <|> structDecl dvis
 
 dataTypeDecl dvis =
-   do (vis,defvis,vrng,(typeSort,trng,doc,ddef,isExtend)) <-
+   do (vis,defvis,vrng,(typeSort,trng,doc,ddef)) <-
           (try $
             do rng <- keyword "abstract"
                x   <- typeDeclKind
@@ -632,7 +632,7 @@ dataTypeDecl dvis =
             do (vis,vrng) <- visibility dvis
                x <- typeDeclKind
                return (vis,vis,vrng,x))
-      tbind <- if isExtend
+      tbind <- if dataDefIsExtend ddef
                 then do (qid,rng) <- qtypeid
                         return (\kind -> TypeBinder qid kind rng (combineRanges [vrng,trng,rng]))
                 else tbinderDef
@@ -642,7 +642,7 @@ dataTypeDecl dvis =
       (cs,crng)    <- semiBracesRanged (constructor defvis tpars resTp) <|> return ([],rangeNull)
       let (constrs,creatorss) = unzip cs
           range   = combineRanges [vrng,trng, getRange (tbind kind),prng,crng]
-      return (DataType name tpars constrs range vis typeSort ddef DataNoEffect isExtend doc, concat creatorss)
+      return (DataType name tpars constrs range vis typeSort ddef DataNoEffect doc, concat creatorss)
    where
     tpVar tb = TpVar (tbinderName tb) (tbinderRange tb)
     tpCon tb = TpCon (tbinderName tb) (tbinderRange tb)
@@ -669,7 +669,7 @@ structDecl dvis =
       let (tid,rng) = getRName name
           conId     = toConstructorName tid
           (usercon,creators) = makeUserCon conId tpars resTp [] pars Nothing rng (combineRange rng prng) defvis doc
-      return (DataType name tpars [usercon] (combineRanges [vrng,trng,rng,prng]) vis Inductive ddef DataNoEffect False doc, creators)
+      return (DataType name tpars [usercon] (combineRanges [vrng,trng,rng,prng]) vis Inductive ddef DataNoEffect doc, creators)
 
 tpVar tb = TpVar (tbinderName tb) (tbinderRange tb)
 tpCon tb = TpCon (tbinderName tb) (tbinderRange tb)
@@ -686,25 +686,25 @@ enum
        return (UserCon con [] [] rng rng)
   -}
 
-typeDeclKind :: LexParser (DataKind,Range,String,DataDef, Bool)
+typeDeclKind :: LexParser (DataKind,Range,String,DataDef)
 typeDeclKind
   = try(
     do (rng1,kind) <-     do{ rng <- specialIdOr "div" ["rec"]; return (rng,Retractive) }
                       <|> do{ rng <- specialId "co"; return (rng,CoInductive) }
        (rng2,doc)  <- dockeyword "type"
-       return (kind,combineRanges [rng1,rng2],doc,DataDefNormal,False)
+       return (kind,combineRanges [rng1,rng2],doc,DataDefNormal)
     )
   <|>
     try(
-    do (rng1, ddef,isExtend) <- do { rng <- specialId "open"; return (rng, DataDefOpen, False) }
-                            <|> do { rng <- specialId "extend"; return (rng, DataDefOpen, True) }
-                            <|> do { rng <- specialId "value"; return (rng, DataDefValue valueReprZero, False) }
-                            <|> do { rng <- specialId "lazy"; return (rng, DataDefLazy, False) }
+    do (rng1, ddef)          <- do { rng <- specialId "open"; return (rng, DataDefOpen False) }
+                            <|> do { rng <- specialId "extend"; return (rng, DataDefOpen True) }
+                            <|> do { rng <- specialId "value"; return (rng, DataDefValue valueReprZero) }
+                            <|> do { rng <- specialId "lazy"; return (rng, DataDefLazy) }
                             <|> do { rng <- specialIdOr "reference" ["ref","heap"];
-                                    return (rng, DataDefNormal, False) }
-                            <|> return (rangeNull, DataDefAuto False {-not a struct-}, False)
+                                    return (rng, DataDefNormal) }
+                            <|> return (rangeNull, DataDefAuto False {-not a struct-})
        (rng2,doc) <- dockeyword "type"
-       return (Inductive,combineRanges [rng1,rng2],doc,ddef,isExtend))
+       return (Inductive,combineRanges [rng1,rng2],doc,ddef))
 
 
 typeKindParams
@@ -1013,7 +1013,7 @@ makeEffectDecl decl =
       hndCon     = UserCon (toHandlerConName hndName) [] [(Private,fld) | fld <- hndFields] Nothing Nothing krng grng vis ""
       hndTpDecl  = DataType hndTpName (tpars {- tparsNonScoped -} ++ [hndEffTp,hndResTp]) [hndCon] grng vis sort
                    DataDefNormal (DataEffect isInstance singleShot)
-                   False docx -- ("// handlers for the " ++ docEffect)
+                   docx -- ("// handlers for the " ++ docEffect)
 
       -- declare the handle function
 
