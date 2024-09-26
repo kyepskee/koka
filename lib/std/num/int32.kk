@@ -36,7 +36,6 @@ pub inline fip fun i32( i : int ) : int32
 
 // Convert an integer to an `:int32`. The number is _clamped_ to the maximal or minimum `:int32`
 // value if it is outside the range of an `:int32`.
-// Needed for control flow contexts in `module std/core/hnd`
 pub inline fip extern int32( i : int) : int32
   c  "kk_integer_clamp32"
   cs "Primitive.IntToInt32"

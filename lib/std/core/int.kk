@@ -339,7 +339,6 @@ pub inline fip extern int16/int( i : int16 ) : int
   js "$std_core_types._int_from_int32"
 
 
-
 // clamp an `:int` to fit in an `:intptr_t`.
 pub fip extern intptr_t( i : int) : intptr_t
   c  "kk_integer_clamp_intptr_t"

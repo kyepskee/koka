@@ -25,12 +25,19 @@ fip fun sreverse( xs : list<a> ) : stream<a>
 fip extern lazy-whnf-target(target : a) : ()
   ""
 
+inline fip extern kk-datatype-is-whnf(^x:a, lazy-tag:int32) : bool
+  c "kk_datatype_is_whnf"
+
+inline fip extern kk-datatype-ptr-is-whnf(^x:a, lazy-tag:int32) : bool
+  c "kk_datatype_ptr_is_whnf"
+
+
 // internal: explicitly force update-in-place for lazy values
 fip extern lazy-update(target : a, x : a) : a
   c inline "#1"
 
 
-inline fip extern lazy-atomic-enter(^target : a) : bool
+inline fip extern lazy-atomic-enter(^target : a, lazy-tag: int32 ) : bool
   c "kk_lazy_atomic_enter"
 
 inline fip extern lazy-atomic-unblock(target : a) : ()
@@ -51,7 +58,7 @@ noinline fbip fun stream-whnf( s : stream<a> ) : _ stream<a>
   lazy-whnf-target(s)
   match s
     SAppRev( pre, post )
-      -> match stream-force(pre)
+      -> match stream-forcex(pre)
            // SNil        -> stream-whnf(lazy-update(s,sreverse(post)))  // (A)
            SNil        -> match post
                             Cons(x,xx) -> lazy-update(s,SCons(x,sreverse(xx)))
@@ -64,17 +71,21 @@ noinline fbip fun stream-whnf( s : stream<a> ) : _ stream<a>
     _ -> s
 
 noinline fbip fun stream-atomic-whnf( s : stream<a> ) : div stream<a>
-  if is-thread-shared(s) && lazy-atomic-enter(s) then
+  if is-thread-shared(s) && lazy-atomic-enter(s,stream/lazy-tag) then
     val whnf = stream-whnf(s)
     lazy-atomic-unblock(s)
     whnf
   else
     stream-whnf(s)
 
+fbip fun stream-forcex( s : stream<a> ) : div stream<a>
+  // stream-whnf(s)
+  if kk-datatype-is-whnf(s,stream/lazy-tag) then s else stream-atomic-whnf(s)
+
 
 inline fbip fun stream-force( s : stream<a> ) : div stream<a>
   // stream-whnf(s)
-  if is-lazy-con(s) then stream-atomic-whnf(s) else s
+  if kk-datatype-is-whnf(s,stream/lazy-tag) then s else stream-atomic-whnf(s)
 
 
 pub fbip fun stream/list( s : stream<a> ) : div list<a>

@@ -26,7 +26,7 @@ import Debug.Trace
 -- import Type.Pretty
 
 import Data.Char(isAlphaNum)
-import Data.List(groupBy,intersperse,nubBy,sortOn,partition)
+import Data.List(groupBy,intersperse,nubBy,sortOn,partition,find)
 import Data.Maybe(catMaybes,isJust)
 import Control.Monad(when)
 
@@ -166,6 +166,10 @@ synTypeDef modName (Core.Data dataInfo)
     (if (dataInfoIsOpen dataInfo)
       then map synConstrTag (dataInfoConstrs dataInfo)
       else [])
+    ++
+    (if (dataDefIsLazy (dataInfoDef dataInfo))
+      then [synIndirectTag dataInfo]
+      else [])
 
 
 synCopyCon :: Name -> DataInfo -> ConInfo -> DefGroup Type
@@ -280,6 +284,42 @@ synConstrTag (con)
         rc   = rangeHide (conInfoRange con)
         expr = Lit (LitString (show (conInfoName con)) rc)
     in DefNonRec (Def (ValueBinder name () expr rc rc) rc (conInfoVis con) DefVal InlineNever "")
+
+synIndirectTag :: DataInfo -> DefGroup Type
+synIndirectTag info
+  = let xrng     = dataInfoRange info
+        rng      = rangeHide xrng
+        dataName = unqualify $ dataInfoName info
+        defName  = qualifyLocally (nameAsModuleName dataName) (newName "lazy-tag")
+        indirectTag = case find (isLazyIndirectConName . conInfoName) (dataInfoConstrs info) of
+                        Nothing  -> failure $ "Kind.Infer.synIsWhnf: no indirection constructor found: " ++ show (dataInfoName info)
+                        Just ind -> conInfoTag ind
+        expr      = App (Var nameInternalInt32 False rng) [(Nothing,Lit (LitInt (toInteger indirectTag) rng))] rng
+    in DefNonRec (Def (ValueBinder defName () expr rng rng) rng (dataInfoVis info) DefVal InlineAlways "// Automatically generated tag value of lazy indirection")
+
+
+synIsWhnf :: DataInfo -> DefGroup Type
+synIsWhnf info
+  = let xrng     = dataInfoRange info
+        rng      = rangeHide xrng
+
+        dataName = unqualify $ dataInfoName info
+        defName  = qualifyLocally (nameAsModuleName dataName) (newName "is-whnf")
+        indirectTag = case find (isLazyIndirectConName . conInfoName) (dataInfoConstrs info) of
+                        Nothing  -> failure $ "Kind.Infer.synIsWhnf: no indirection constructor found: " ++ show (dataInfoName info)
+                        Just ind -> conInfoTag ind
+
+        dataTp    = typeApp (TCon (TypeCon (dataInfoName info) (dataInfoKind info))) (map TVar (dataInfoParams info))
+        fullTp    = tForall (dataInfoParams info) [] (typeFun [(arg,dataTp)] typeTotal typeBool)
+
+        alwaysPtr = all (\conInfo -> not (null (conInfoParams conInfo))) (dataInfoConstrs info)
+
+        arg       = unqualify $ dataInfoName info
+        expr      = Ann (Lam [ValueBinder arg Nothing Nothing rng rng] testExpr rng) fullTp xrng
+        testExpr  = App (Var (newName (if alwaysPtr then "kk-datatype-is-whnf" else "kk-datatype-ptr-is-whnf")) False rng)
+                        [(Nothing,Var arg False rng), (Nothing,tagExpr)] rng
+        tagExpr   = App (Var nameInternalInt32 False rng) [(Nothing,Lit (LitInt (toInteger indirectTag) rng))] rng
+    in DefNonRec (Def (ValueBinder defName () expr rng rng) rng (dataInfoVis info) (DefFun [Borrow] (Fip (AllocAtMost 0))) InlineAlways "")
 
 {---------------------------------------------------------------
   Types for constructors
