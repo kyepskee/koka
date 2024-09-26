@@ -54,4 +54,47 @@
 #define kk_atomic_dec_relaxed(p)            kk_atomic_sub_relaxed(p,1)
 #define kk_atomic_dec_release(p)            kk_atomic_sub_release(p,1)
 
+
+
+#if defined(__cplusplus)
+#include <thread>
+static inline void kk_atomic_yield(void) {
+  std::this_thread::yield();
+}
+#elif defined(_WIN32)
+static inline void kk_atomic_yield(void) {
+  YieldProcessor();
+}
+#elif defined(__SSE2__)
+#include <emmintrin.h>
+static inline void kk_atomic_yield(void) {
+  _mm_pause();
+}
+#elif defined(__GNUC__) && (defined(__x86_64__) || defined(__i386__) || defined(__aarch64__) || defined(__sun))
+#if defined(__x86_64__) || defined(__i386__)
+static inline void kk_atomic_yield(void) {
+  __asm__ volatile ("pause" ::: "memory");
+}
+#elif defined(__aarch64__)
+static inline void kk_atomic_yield(void) {
+  __asm__ volatile("wfe");
+}
+#elif defined(__sun)
+#include <synch.h>
+static inline void kk_atomic_yield(void) {
+  smt_pause();
+}
+#endif
+#elif defined(__wasi__)
+#include <sched.h>
+static inline void kk_atomic_yield(void) {
+  sched_yield();
+}
+#else
+#include <unistd.h>
+static inline void kk_atomic_yield(void) {
+  sleep(0);
+}
+#endif
+
 #endif // include guard

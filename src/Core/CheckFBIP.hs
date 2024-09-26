@@ -116,11 +116,11 @@ chkExpr expr
               writeOutput =<< foldM (\out nm -> bindName nm Nothing out) out pars
 
       App (TypeApp (Var tname _) _) _ | getName tname == nameCCtxSetCtxPath
-                                     || nameStem (getName tname) == "lazy-whnf-target"
-                                     || nameStem (getName tname) == "whitehole"
-                                     || nameStem (getName tname) == "blackhole"
+                                     || nameStem (getName tname) `elem`
+                                        ["lazy-whnf-target","lazy-atomic-unblock","lazy-atomic-eval"]
         -> return ()
-      App (TypeApp (Var tname _) _) _ | getName tname `elem` [nameCCtxSetCtxPath] -> return ()
+      App (TypeApp (Var tname _) _) [_, conApp] | nameStem (getName tname) `elem` ["lazy-update"]
+        -> chkExpr conApp
 
       App fn args -> chkApp fn args
       Var tname info -> markSeen tname info

@@ -161,6 +161,7 @@ data UserCon t u k
             , userconExists :: ![TypeBinder k] -- ^ existentials
             , userconParams :: ![(Visibility,ValueBinder t (Maybe (Expr u)))]            -- ^ parameters
             , userconResult :: !(Maybe t) -- ^ used internally for limited GADT's (for now)
+            , userConLazy :: !(Maybe (Expr u)) -- lazy constructor?
             , userconNameRange :: !Range       --  ^ name range
             , userconRange :: !Range           --  ^ total range
             , userconVis :: !Visibility     -- ^  visibility
@@ -339,7 +340,6 @@ data UserKind
   deriving (Show)
 
 
-
 {--------------------------------------------------------------------------
   The range of expressions/types etc. can be retrieved via "getRange"
 --------------------------------------------------------------------------}
@@ -371,7 +371,7 @@ instance Ranged (TypeBinder k) where
   getRange (TypeBinder _ _ _ range) = range
 
 instance Ranged (UserCon t u k) where
-  getRange (UserCon _ _ _ _ _ range _ _) = range
+  getRange (UserCon _ _ _ _ _ _ range _ _) = range
 
 instance Ranged a => Ranged [a] where
   getRange rs
@@ -455,8 +455,8 @@ instance HasName (TypeBinder k) where
   getNameRange (TypeBinder name kind nameRange range) = nameRange
 
 instance HasName (UserCon t u k) where
-  getName (UserCon name exist params result nameRange range _ _) = name
-  getNameRange (UserCon name exist params result nameRange range _ _) = nameRange
+  getName (UserCon name exist params result mbLazyExpr nameRange range _ _) = name
+  getNameRange (UserCon name exist params result mbLazyExpr nameRange range _ _) = nameRange
 
 instance HasName (TypeDef t u k) where
   getRName typeDef

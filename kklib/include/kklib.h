@@ -9,7 +9,7 @@
   found in the LICENSE file at the root of this distribution.
 ---------------------------------------------------------------------------*/
 
-#define KKLIB_BUILD          155    // modify on changes to trigger recompilation..
+#define KKLIB_BUILD          158    // modify on changes to trigger recompilation..
 // #define KK_DEBUG_FULL       1    // set to enable full internal debug checks
 
 // Includes
@@ -54,11 +54,11 @@
 typedef enum kk_tag_e {
   KK_TAG_INVALID   = 0,
   KK_TAG_MIN       = 1,
-  KK_TAG_LAZY      = 0x03,     // lazy constructors start here
+
+  KK_TAG_LAZY      = 0x0400,
+  KK_TAG_LAZY_INDIRECT = KK_TAG_LAZY,
+
   KK_TAG_MAX       = 0xFFC0,   // space for 64 special tags
-  KK_TAG_LAZY_EVAL,   // lazy value being evaluated (black hole)
-  KK_TAG_LAZY_PREP,   // used for multi-threaded initialization of lazy value evaluation
-  KK_TAG_LAZY_IND,    // indirection node used for lazy constructors
   KK_TAG_OPEN,        // open datatype, first field is a string tag
   KK_TAG_BOX,         // boxed value type
   KK_TAG_BOX_ANY,     // kk_box_any polymorphic value
@@ -92,9 +92,7 @@ static inline bool kk_tag_is_raw(kk_tag_t tag) {
   return (tag >= KK_TAG_CPTR_RAW);
 }
 
-static inline bool kk_tag_is_lazy(kk_tag_t tag) {
-  return (tag >= KK_TAG_LAZY && tag <= KK_TAG_LAZY_IND);
-}
+
 
 /*--------------------------------------------------------------------------------------
   Headers
@@ -123,12 +121,13 @@ static inline kk_refcount_t kk_refcount_inc(kk_refcount_t rc) {
 }
 
 // field index: used for stackless free-ing and also for the context path (for first-class constructor contexts)
-typedef int kk_field_idx_t;
-#define KK_FIELD_IDX_MAX        0xFF
+// (and we use also two values for atomic lazy evaluation)
+#define KK_FIELD_IDX_MAX          0xFF
+#define KK_FIELD_IDX_LAZY_BLOCKED 0xFF
 
 // context path index
 typedef int kk_cpath_t;
-#define KK_CPATH_MAX            KK_FIELD_IDX_MAX
+#define KK_CPATH_MAX              0xFE
 
 
 // Every heap block starts with a 64-bit header with a reference count, tag, and scan fields count.
@@ -139,6 +138,8 @@ typedef struct kk_header_s {
   uint16_t  tag;              // constructor tag
   _Atomic(kk_refcount_t) refcount; // reference count  (last to reduce code size constants in kk_header_init)
 } kk_header_t;
+
+typedef uint64_t kk_uint_header_t;  // unsigned int of sizeof(kk_header_t)
 
 #define KK_SCAN_FSIZE_MAX (0xFF)
 #define KK_HEADER(scan_fsize,fidx,tag)    { scan_fsize, fidx, tag, KK_ATOMIC_VAR_INIT(0) }      // start with unique refcount

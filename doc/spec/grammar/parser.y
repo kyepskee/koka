@@ -319,7 +319,7 @@ constructors1: constructors1 semis1 constructor
             ;
 
 constructor : pub con conid typeparams conparams
-            | pub con STRING typeparams conparams
+            | pub ID_LAZY con conid typeparams conparams RARROW blockexpr
             ;
 
 con         : CON

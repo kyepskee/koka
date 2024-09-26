@@ -9,130 +9,130 @@
 #include "kklib.h"
 #include "kklib/lazy.h"
 
-// Eval lazy value that is unique
-// Since the `eval` is generated and does not give direct access to the argument
-// (which is immediately matched against lazy constructors) we cannot recurse on
-// it and we do not have to create a blackhole or indirections (since the result
-// is not shared we can return it as-is).
-static kk_datatype_t kk_lazy_eval_unique(kk_block_t* b, kk_function_t eval, kk_context_t* ctx)
-{
-  kk_assert(kk_block_is_valid(b));
-  kk_assert(kk_block_is_unique(b));
-  kk_assert(kk_block_is_lazy(b));
-  kk_assert(!kk_block_is_blackhole(b));  // unique lazy value cannot result in a black hole (?)
-                                         // (as long as we always use the generated eval function which does not give access to the value itself?)
-  // evaluate
-  return kk_datatype_unbox(kk_function_call(kk_box_t, (kk_function_t, kk_box_t, kk_context_t*), eval, (eval, kk_block_box(b, ctx), ctx), ctx));
+// We cannot assume the platform support byte sized atomic operations
+// To access the `_field_idx` atomically, we access the entire header atomically as a `uint64_t`.
+// Hopefully this interacts well with the overlapping atomic refcount operations (as a `uint32_t`).
+// Otherwise we need to revise this to use a bit from the reference count as the blocking bit.
+
+static void kk_header_atomic_load_relaxed(kk_header_t* dest /*out*/, kk_header_t* src /*in*/) {
+  *((kk_uint_header_t*)dest) = kk_atomic_load_relaxed((const _Atomic(kk_uint_header_t)*)src);
+}
+
+static void kk_header_atomic_load_acquire(kk_header_t* dest /*out*/, kk_header_t* src /*in*/) {
+  *((kk_uint_header_t*)dest) = kk_atomic_load_acquire((const _Atomic(kk_uint_header_t)*)src);
+}
+
+static void kk_header_atomic_store_release(kk_header_t* dest /*out*/, kk_header_t* src /*in*/) {
+  kk_atomic_store_release((_Atomic(kk_uint_header_t)*)dest, *((kk_uint_header_t*)src));
+}
+
+static void kk_header_copy(kk_header_t* dest /*out*/, kk_header_t* src /*in*/) {
+  *((kk_uint_header_t*)dest) = *((kk_uint_header_t*)src);
+}
+
+static bool kk_header_compare_and_swap(kk_header_t* dest /*out*/, kk_header_t* expected /*in-out*/, kk_header_t* desired /*in*/) {
+  return kk_atomic_cas_strong_acq_rel((_Atomic(kk_uint_header_t)*)dest, (kk_uint_header_t*)expected, *((kk_uint_header_t*)desired));
 }
 
 
-// Eval lazy value that is not uniquely referenced but not thread-shared
-//
-// Note: we always create an indirection node for now. However, if we can somehow
-// ensure the result of the `eval` function reuses the argument we could avoid
-// allocation in many cases. However, we must prevent reuse of the argument for anything
-// else than the result which seems quite difficult to guaratee at compile-time?
-static kk_datatype_t kk_lazy_eval_local(kk_block_t* b, kk_function_t eval, kk_context_t* ctx)
-{
-  kk_assert(kk_block_is_valid(b));
-  kk_assert(!kk_block_is_thread_shared(b));
-  kk_assert(!kk_block_is_unique(b));
-  kk_assert(kk_block_is_lazy(b));
-  if kk_unlikely(kk_block_is_blackhole(b)) {
-    // black hole: trying to recursively evaluate the same value (within this thread)
-    // we just return it as-is which will result in a pattern match error later on which raises the exception
-    return kk_datatype_from_ptr(b,ctx);
-  }
-
-  // copy and overwrite the block with a blackhole
-  // note: we need to copy since we use a tag for the blackhole, but need to pass the original object
-  // to the `eval` function. If we would steal a bit from, say, the field_index, we could mark it
-  // there and pass it as-is. It would not be reused as it is shared, and afterwards we could overwrite
-  // it with an indirection node. (so it would not save allocations but we would avoid the generic copy
-  // that relies on `kk_malloc_reusable_size`).
-  kk_block_t* x = kk_block_alloc_copy(b, ctx);
-  b->header.tag = KK_TAG_LAZY_EVAL;
-  b->header.scan_fsize = 0;
-
-  // evaluate
-  kk_datatype_t res = kk_datatype_unbox(kk_function_call(kk_box_t, (kk_function_t, kk_box_t, kk_context_t*), eval, (eval,kk_block_box(x, ctx),ctx), ctx));
-
-  // TODO: support yielding
-  // we need to create some minimal support in the runtime (from `hnd.c`) to have `yield_extend` available.
-  if kk_yielding(ctx) {
-    kk_fatal_error(ENOTSUP, "yielding from inside a lazy constructor is currently not supported");
-    return kk_datatype_null();
-  }
-
-  // create an indirection to the result
-  kk_block_field_set(b, 0, kk_datatype_box(res));
-  b->header.scan_fsize = 1;
-  b->header.tag = KK_TAG_LAZY_IND;
-  return kk_datatype_from_ptr(b,ctx);  // this will follow the indirection in the main loop in `kk_lazy_eval`
-}
-
-// Eval a thread-shared value.
-static kk_datatype_t kk_lazy_eval_thread_shared(kk_block_t* b, kk_function_t eval, kk_context_t* ctx) {
-  // TODO!
-  // The code is the same as for `local` but now atomically.
-  // The idea is to duplicate the block `b` and evaluate that (with an rc of 1)
-  // while the original `b` is set as a blackhole where the first field points to an atomic blocked list
-  // of `kk_context_t` that are blocked on it. Once done, `b` becomes an indirection node.
-  // tricky: if we don't have a double word atomic compare-and-swap, we need a way
-  // to set it to a blackhole atomically while also initializing the wait-list field.
-  // We can use the special `KK_TAG_LAZY_PREP` for that?
-  return kk_lazy_eval_local(b, eval, ctx);
-}
-
-
-// note: we assume `eval` is static for efficiency (so `dup`/`drop` are no-ops in the usual case)
-kk_decl_export kk_datatype_t kk_datatype_lazy_eval(kk_datatype_t next, kk_function_t eval, kk_context_t* ctx)
-{
-  kk_assert(kk_datatype_is_lazy(next, ctx));
-  kk_block_t* b = kk_datatype_as_ptr(next,ctx);
-  kk_tag_t tag = kk_block_tag(b);
+static void kk_lazy_atomic_wait(kk_block_t* b, kk_context_t* ctx) {
+  // TODO: if we eval recursively, we could busy wait on ourselves
+  kk_assert(kk_block_is_thread_shared(b));
+  kk_header_t header;
   do {
-    kk_refcount_t rc = kk_block_refcount(b);
-    if (tag==KK_TAG_LAZY_IND) {
-      // follow indirection
-      next = kk_datatype_unbox(kk_block_field(b, 0));
-      if (rc==0) {
-        kk_block_free(b, ctx);
-      }
-      else {
-        next = kk_datatype_dup(next, ctx);
-        kk_block_decref(b, ctx);
-      }
-    }
-    else {
-      kk_function_static_dup(eval,ctx); // since we can recurse, we need to keep the `eval` function
-      if (rc==0) {
-        // evaluate unique value
-        next = kk_lazy_eval_unique(b, eval, ctx);
-      }
-      else if kk_unlikely(kk_refcount_is_thread_shared(rc)) {
-        // evaluate thread shared
-        next = kk_lazy_eval_thread_shared(b, eval, ctx);
-      }
-      else {
-        // evaluate thread local
-        next = kk_lazy_eval_local(b, eval, ctx);
-      }
-      // TODO: support yielding from `eval`
-      // we need to create some minimal support in the runtime (from `hnd.c`) to have `yield_extend` available.
-      if kk_yielding(ctx) {
-        kk_fatal_error(ENOTSUP, "yielding from inside a lazy constructor is currently not supported");
-        return kk_datatype_null();
-      }
-    }
-    // check if we need to recursively keep forcing
-    if (!kk_datatype_is_ptr(next)) break;             // value
-    kk_block_t* nextb = kk_datatype_as_ptr(next, ctx);
-    tag = kk_block_tag(nextb);
-    if (nextb==b && tag==KK_TAG_LAZY_EVAL) break; // returned blackhole
-    b = nextb;
-    // recursively force the result
-  } while(kk_tag_is_lazy(tag));
-  kk_function_static_drop(eval,ctx);
-  return next;
+    kk_atomic_yield(); // TODO: improve the busy wait
+    kk_header_atomic_load_acquire(&header, &b->header);
+  } while (header._field_idx == KK_FIELD_IDX_LAZY_BLOCKED);
+  kk_assert(header.tag <= KK_TAG_LAZY_INDIRECT);
 }
+
+kk_decl_export bool kk_lazy_atomic_enter(kk_datatype_t lazy /* borrow */, kk_context_t* ctx) {
+  kk_block_t* b = kk_datatype_as_ptr(lazy, ctx);
+  kk_assert(kk_block_is_thread_shared(b));
+  kk_header_t blocked_header;
+  kk_header_t header;
+  kk_header_atomic_load_relaxed(&header, &b->header);
+  do {
+    if (header.tag <= KK_TAG_LAZY_INDIRECT) {
+      // already eval'd
+      return false;
+    }
+    else if (header._field_idx == KK_FIELD_IDX_LAZY_BLOCKED) {
+      kk_lazy_atomic_wait(b,ctx);
+      return false;
+    }
+    kk_assert(header.tag <= KK_TAG_MAX);
+    kk_header_copy(&blocked_header, &header);
+    blocked_header._field_idx = KK_FIELD_IDX_LAZY_BLOCKED;
+  } while (!kk_header_compare_and_swap(&b->header, &header, &blocked_header));
+  return true;
+}
+
+kk_decl_export void kk_lazy_atomic_unblock(kk_datatype_t lazy /* own */, kk_context_t* ctx) {
+  kk_block_t* b = kk_datatype_as_ptr(lazy, ctx);
+  kk_assert(kk_block_is_thread_shared(b));
+  kk_header_t unblocked_header;
+  kk_header_t header;
+  kk_header_atomic_load_relaxed(&header, &b->header);
+  do {
+    kk_assert(header._field_idx == KK_FIELD_IDX_LAZY_BLOCKED);
+    kk_header_copy(&unblocked_header, &header);
+    unblocked_header._field_idx = 0;
+  } while (!kk_header_compare_and_swap(&b->header, &header, &unblocked_header));
+  kk_datatype_drop(lazy,ctx);
+}
+
+/*
+kk_decl_export kk_datatype_t kk_lazy_atomic_eval(kk_box_t lazy, kk_context_t* ctx) {
+  kk_block_t* b = kk_datatype_as_ptr(kk_datatype_unbox(lazy), ctx);
+  kk_assert(kk_block_is_thread_shared(b));
+  kk_header_t prep_header;
+  kk_header_t header;
+  kk_header_atomic_load_relaxed(&header, &b->header);
+  do {
+    if (header.tag >= KK_TAG_LAZY_EVAL) {
+      return kk_datatype_Nothing();  // already being claimed (Lazy-wait)
+    }
+    kk_header_copy(&prep_header, &header);
+    prep_header.tag = KK_TAG_LAZY_PREP;
+  } while (!kk_header_compare_and_swap(&b->header, &header, &prep_header));
+
+  // now make it a blackhole copying the object and changing the tag
+  kk_block_t* x = kk_block_alloc_copy(b, ctx);
+  x->header.tag = header.tag;               // restore the tag
+  kk_block_field_set(b, 0, kk_box_null());  // todo: initial wait mutex
+
+  // set the header it to eval (to signify field[0] (the wait mutex) can be accessed )
+  kk_header_t eval_header;
+  kk_header_copy(&eval_header,&prep_header);
+  eval_header.tag = KK_TAG_LAZY_EVAL;
+  eval_header.scan_fsize = 1;          // the wait mutex
+  kk_header_atomic_store_release(&b->header,&eval_header);
+  // return the copy
+  return kk_datatype_from_ptr(x,ctx);       // return Lazy-eval(copy)
+}
+
+kk_decl_export kk_box_t kk_lazy_atomic_wait(kk_box_t lazy, kk_context_t* ctx) {
+  kk_block_t* b = kk_datatype_as_ptr(kk_datatype_unbox(lazy), ctx);
+  kk_assert(kk_block_is_thread_shared(b));
+  kk_header_t header;
+  do {
+    kk_atomic_yield();
+    kk_header_atomic_load_acquire(&header, &b->header);
+  } while (header.tag >= KK_TAG_LAZY_EVAL);
+  return lazy;
+}
+
+kk_decl_export void kk_lazy_atomic_set_header(kk_header_t* dest, kk_ssize_t scan_fsize, kk_tag_t tag, kk_context_t* ctx) {
+  kk_assert(scan_fsize >= 0 && scan_fsize <= KK_SCAN_FSIZE_MAX);
+  kk_header_t new_header;
+  kk_header_t header;
+  kk_header_atomic_load_relaxed(&header, dest);
+  do {
+    kk_assert(header.tag >= KK_TAG_LAZY_EVAL);
+    kk_header_copy(&new_header, &header);
+    new_header.scan_fsize = (uint8_t)scan_fsize;
+    new_header.tag = tag;
+  } while (!kk_header_compare_and_swap(dest, &header, &new_header));
+}
+*/

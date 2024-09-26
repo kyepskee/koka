@@ -97,7 +97,7 @@ ruToAssign (Match pres arg)  = return ([DefNonRec (makeDef nameNil pre) | pre <-
 ruToAssign (NoMatch expr)
   = if isTotal expr
      then return ([],(expr,False))
-     else do name <- uniqueName "ru"
+     else do name <- uniqueName "ru-def"
              let def = DefNonRec (makeDef name expr)
              let var = Var (TName name (typeOf expr)) InfoNone
              return ([def],(var,False))
@@ -395,7 +395,7 @@ ruLazyUpdate lazyTName arg
                    -- singleton uses an indirection
                    Con cname repr -> lazyIndirect reuseName lazyInfo True tailArg
                    -- otherwise use an indirection
-                   _ -> do warning (\penv -> text "cannot update lazy value directly as the result size is not statically known -- using indirection")
+                   _ -> do warning (\penv -> text "cannot update lazy value directly as the whnf is not statically known -- using indirection")
                            lazyIndirect reuseName lazyInfo False tailArg
   where
     ppName penv name = prettyName (Pretty.colors penv) name
@@ -449,7 +449,7 @@ ruLazyUpdate lazyTName arg
       = do  argName <- uniqueTName "lazyres" (typeOf lazyTName)
             arg' <- ruExpr arg
             let argVar  = Var argName InfoNone
-            indCon <- lazyIndirectCon reuseName lazyInfo argVar
+            indCon <- lazyApplyIndirectConAt reuseName lazyInfo argVar
             let argDef body = makeDefsLet [makeDef (getName argName) arg'] body
                 indExpr = makeIfExpr (genIsUnique lazyTName)
                             (makeStats [genFree lazyTName, argVar])
@@ -458,8 +458,8 @@ ruLazyUpdate lazyTName arg
                                                 [genDecRef lazyTName, argVar]]))
             return (argDef indExpr)
 
-    lazyIndirectCon :: TName -> (Maybe Pattern,Int,Int) -> Expr -> Reuse Expr
-    lazyIndirectCon reuseName lazyInfo arg'
+    lazyApplyIndirectConAt :: TName -> (Maybe Pattern,Int,Int) -> Expr -> Reuse Expr
+    lazyApplyIndirectConAt reuseName lazyInfo arg'
       = do mbInfo <- getLazyIndirectCon lazyTName
            case mbInfo of
              Just (cinfo,crepr)

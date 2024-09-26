@@ -668,7 +668,7 @@ structDecl dvis =
       (pars,prng)  <- conPars defvis
       let (tid,rng) = getRName name
           conId     = toConstructorName tid
-          (usercon,creators) = makeUserCon conId tpars resTp [] pars rng (combineRange rng prng) defvis doc
+          (usercon,creators) = makeUserCon conId tpars resTp [] pars Nothing rng (combineRange rng prng) defvis doc
       return (DataType name tpars [usercon] (combineRanges [vrng,trng,rng,prng]) vis Inductive ddef DataNoEffect False doc, creators)
 
 tpVar tb = TpVar (tbinderName tb) (tbinderRange tb)
@@ -699,6 +699,7 @@ typeDeclKind
     do (rng1, ddef,isExtend) <- do { rng <- specialId "open"; return (rng, DataDefOpen, False) }
                             <|> do { rng <- specialId "extend"; return (rng, DataDefOpen, True) }
                             <|> do { rng <- specialId "value"; return (rng, DataDefValue valueReprZero, False) }
+                            <|> do { rng <- specialId "lazy"; return (rng, DataDefLazy, False) }
                             <|> do { rng <- specialIdOr "reference" ["ref","heap"];
                                     return (rng, DataDefNormal, False) }
                             <|> return (rangeNull, DataDefAuto False {-not a struct-}, False)
@@ -719,17 +720,22 @@ typeKindParams
 
 constructor :: Visibility -> [UserTypeBinder] -> UserType -> LexParser (UserCon UserType UserType UserKind, [UserDef])
 constructor defvis foralls resTp
-  = do ((vis,vrng),(rng0,doc),(con,rng)) <- try $ do v <- visibility defvis
-                                                     krng <- keyword "con" <|> return rangeNull
-                                                     (c,(crng,doc)) <- docconid
-                                                     return (v,(krng,doc),(c,crng))
+  = do ((vis,vrng),(rng0,doc),(con,rng),isLazy) <- try $ do v <- visibility defvis
+                                                            isLazy <- optional (specialId "lazy")
+                                                            krng <- keyword "con" <|> return rangeNull
+                                                            (c,(crng,doc)) <- docconid
+                                                            return (v,(krng,doc),(c,crng),isLazy)
        exists    <- typeparams
        (pars,prng) <- conPars vis
-       return (makeUserCon con foralls resTp exists pars rng (combineRanges [vrng,rng0,rng,getRange exists,prng]) vis doc)
+       mbLazyExpr  <- if not isLazy then return Nothing
+                        else do keyword "->"
+                                exp <- blockexpr
+                                return (Just exp)
+       return (makeUserCon con foralls resTp exists pars mbLazyExpr rng (combineRanges [vrng,rng0,rng,getRange exists,prng]) vis doc)
 
-makeUserCon :: Name -> [UserTypeBinder] -> UserType -> [UserTypeBinder] -> [(Visibility,ValueBinder UserType (Maybe UserExpr))] -> Range -> Range -> Visibility -> String -> (UserCon UserType UserType UserKind, [UserDef])
-makeUserCon con foralls resTp exists pars nameRng rng vis doc
-  = (UserCon con exists conParams Nothing nameRng rng vis doc
+makeUserCon :: Name -> [UserTypeBinder] -> UserType -> [UserTypeBinder] -> [(Visibility,ValueBinder UserType (Maybe UserExpr))] -> Maybe UserExpr -> Range -> Range -> Visibility -> String -> (UserCon UserType UserType UserKind, [UserDef])
+makeUserCon con foralls resTp exists pars mbLazyExpr nameRng rng vis doc
+  = (UserCon con exists conParams Nothing mbLazyExpr nameRng rng vis doc
     , if (any (isJust . binderExpr . snd) pars) then [creator] else []
     )
   where
@@ -1004,7 +1010,7 @@ makeEffectDecl decl =
       hndFieldCfc= ValueBinder (newHiddenName "cfc")  (TpCon nameTpInt krng) Nothing krng krng -- first field is the control-flow-context for the handler
       hndFields  = [hndFieldCfc] ++ opFields
 
-      hndCon     = UserCon (toHandlerConName hndName) [] [(Private,fld) | fld <- hndFields] Nothing krng grng vis ""
+      hndCon     = UserCon (toHandlerConName hndName) [] [(Private,fld) | fld <- hndFields] Nothing Nothing krng grng vis ""
       hndTpDecl  = DataType hndTpName (tpars {- tparsNonScoped -} ++ [hndEffTp,hndResTp]) [hndCon] grng vis sort
                    DataDefNormal (DataEffect isInstance singleShot)
                    False docx -- ("// handlers for the " ++ docEffect)

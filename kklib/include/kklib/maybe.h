@@ -21,8 +21,12 @@
   to `kk_box_Nothing`.
 --------------------------------------------------------------------------------------*/
 
+static inline kk_datatype_t kk_datatype_Nothing(void) {
+  return kk_datatype_from_tag(KK_TAG_NOTHING);
+}
+
 static inline kk_box_t kk_box_Nothing(void) {
-  return kk_datatype_box(kk_datatype_from_tag(KK_TAG_NOTHING));
+  return kk_datatype_box(kk_datatype_Nothing());
 }
 
 static inline bool kk_box_is_Nothing(kk_box_t b) {
@@ -51,7 +55,7 @@ static inline kk_box_t kk_unbox_Just(kk_box_t b, kk_borrow_t borrow, kk_context_
       return kk_unbox_Just_block(bl, borrow, ctx);
     }
   }
-  // if borrowing we should not change refcounts, 
+  // if borrowing we should not change refcounts,
   // and if not borrowing, we consume the b
   return b;
 }

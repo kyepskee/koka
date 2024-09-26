@@ -4,41 +4,50 @@ import std/core/undiv
 type stream<a>
   SNil
   SCons( head : a, tail : stream<a> )
-  SAppRev( pre : stream<a>, post : list<a> )
-  SIndirect( s : stream<a> )                  // generated (must end in "Indirect")
+  SIndirect( s : stream<a> )
+  lazy SAppRev( pre : stream<a>, post : list<a> ) ->
+    match pre
+      // SNil        -> stream-whnf(lazy-update(s,sreverse(post)))  // (A)
+      SNil        -> match post
+                      Cons(x,xx) -> SCons(x,sreverse(xx))
+                      Nil        -> SNil
+      SCons(x,xx) -> SCons(x,SAppRev(xx,post))
 
-fun sreverse-acc( xs : list<a>, acc : stream<a> ) : stream<a>
+fip fun sreverse-acc( xs : list<a>, acc : stream<a> ) : stream<a>
   match xs
     Cons(x,xx) -> sreverse-acc(xx, SCons(x,acc))
     Nil        -> acc
 
-fun sreverse( xs : list<a> ) : stream<a>
+fip fun sreverse( xs : list<a> ) : stream<a>
   sreverse-acc(xs,SNil)
 
-
-extern lazy-whnf-target(target : a) : ()
+// internal: marker for lazy values that get matched to evaluate to whnf
+fip extern lazy-whnf-target(target : a) : ()
   ""
-extern lazy-update(target : a, x : a) : a
+
+// internal: explicitly force update-in-place for lazy values
+fip extern lazy-update(target : a, x : a) : a
   c inline "#1"
 
 
-// todo:
-extern lazy-atomic-blackhole(^target : a) : bool
-  inline "true"
-extern lazy-atomic-update(target : a, x : a) : a
-  ""
-extern lazy-atomic-wait(target : a) : a
-  ""
-extern datatype-is-thread-local( ^x : a ) : bool
-  inline "true"
-extern datatype-copy( ^x : a ) : a
-  ""
+inline fip extern lazy-atomic-enter(^target : a) : bool
+  c "kk_lazy_atomic_enter"
 
-// this should be generated; lazy-update is always inserted at tail-position.
+inline fip extern lazy-atomic-unblock(target : a) : ()
+  c "kk_lazy_atomic_unblock"
+
+inline fip extern is-thread-shared(^x : a) : bool
+  c "kk_is_thread_shared"
+
+inline fip extern is-lazy-con(^x : a) : bool
+  c "kk_is_lazy_con"
+
+
+// this should be generated; `lazy-update(s,...)`` is always inserted at tail-position.
 // If the argument is not a syntactic non-lazy constructor a recursive call to `stream-whnf` is added as well. (case `(A)`)
 // If the argument is a singleton (`SNil`), larger, or unknown (`sreverse(post)`),
-// an indirection is automatically inserted (`SIndirect`)
-noinline fun stream-whnf( s : stream<a> ) : _ stream<a>
+// an indirection is automatically inserted (`SIndirect`). The latter two issue a warning.
+noinline fbip fun stream-whnf( s : stream<a> ) : _ stream<a>
   lazy-whnf-target(s)
   match s
     SAppRev( pre, post )
@@ -54,16 +63,25 @@ noinline fun stream-whnf( s : stream<a> ) : _ stream<a>
       -> stream-whnf(pretend-decreasing(ind))
     _ -> s
 
-noinline fun stream-atomic-whnf( s : stream<a> ) : _ stream<a>
-  if lazy-atomic-blackhole(s)
-    then lazy-atomic-update(s,SIndirect(stream-whnf(datatype-copy(s))))
-    else stream-whnf(lazy-atomic-wait(s))
+noinline fbip fun stream-atomic-whnf( s : stream<a> ) : div stream<a>
+  if is-thread-shared(s) && lazy-atomic-enter(s) then
+    val whnf = stream-whnf(s)
+    lazy-atomic-unblock(s)
+    whnf
+  else
+    stream-whnf(s)
 
 
-fun stream-force( s : stream<a> ) : _ stream<a>
-  stream-whnf(s)
-  // if datatype-is-thread-local(s)
-  //   then stream-whnf(s) else stream-atomic-whnf(s)
+inline fbip fun stream-force( s : stream<a> ) : div stream<a>
+  // stream-whnf(s)
+  if is-lazy-con(s) then stream-atomic-whnf(s) else s
+
+
+pub fbip fun stream/list( s : stream<a> ) : div list<a>
+  match stream-force(s)
+    SCons(x,xx) -> Cons(x,xx.list)
+    SNil -> Nil
+    _    -> Nil // cannot happen
 
 
 struct bqueue<a>

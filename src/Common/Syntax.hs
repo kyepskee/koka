@@ -20,7 +20,7 @@ module Common.Syntax( Visibility(..)
                     , Target(..), CTarget(..), JsTarget(..), isTargetC, isTargetJS, isTargetWasm
                     , isPublic, isPrivate
                     , DataDef(..)
-                    , dataDefIsRec, dataDefIsOpen, dataDefIsValue, dataDefSize, dataDefIsNormal
+                    , dataDefIsRec, dataDefIsOpen, dataDefIsValue, dataDefSize, dataDefIsNormal, dataDefIsLazy
                     , DataEffect(..)
                     , ValueRepr(..)
                     , valueReprIsMixed, valueReprIsRaw, valueReprNew, valueReprZero
@@ -207,6 +207,7 @@ instance Show DataKind where
 
 data DataDef = DataDefValue !ValueRepr  -- value type
              | DataDefNormal            -- reference type
+             | DataDefLazy              -- lazy reference type
              | DataDefEffect{ dataDefIsLinear :: !Bool, dataDefIsNamed :: !Bool }  -- effect types
              | DataDefRec
              | DataDefOpen
@@ -217,16 +218,16 @@ instance Show DataDef where
   show dd = case dd of
               DataDefValue v   -> "value" ++ show v
               DataDefNormal    -> "reference"
+              DataDefLazy      -> "lazy"
               DataDefRec       -> "div"       -- retractive type
               DataDefOpen      -> "open"
               DataDefAuto isStruct -> "auto" ++ (if isStruct then " struct" else "")
 
 dataDefIsRec ddef
   = case ddef of
-      DataDefValue{}   -> False
-      DataDefNormal    -> False
-      DataDefAuto{}    -> False
-      _  -> True
+      DataDefOpen  -> True
+      DataDefRec   -> True
+      _            -> False
 
 dataDefIsOpen ddef
   = case ddef of
@@ -243,6 +244,10 @@ dataDefIsNormal ddef
       DataDefNormal   -> True
       _ -> False
 
+dataDefIsLazy ddef
+  = case ddef of
+      DataDefLazy   -> True
+      _ -> False
 
 dataDefSize :: Platform -> DataDef -> Int
 dataDefSize platform ddef

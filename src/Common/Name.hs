@@ -41,6 +41,7 @@ module Common.Name
           , toOpsConName, toOpConName, toOpTypeName
           , toConstructorName, isConstructorName, toVarName, toHandlerConName
           , toOpenTagName, isOpenTagName
+          , toLazyIndirectConName, isLazyIndirectConName
           , toValueOperationName, isValueOperationName, fromValueOperationsName, toBasicOperationsName
           , splitModuleName, unsplitModuleName, mergeCommonPath, splitLocalQualName
           , missingQualifier
@@ -752,6 +753,16 @@ toOpConName name
 toOpsConName :: Name -> Name
 toOpsConName name
   = makeHiddenName "Ops" name
+
+-- | Create an lazy indirect constructor name from a type name.
+toLazyIndirectConName :: Name -> Name
+toLazyIndirectConName name
+  = makeHiddenName "Indirect" name
+
+isLazyIndirectConName :: Name -> Bool
+isLazyIndirectConName name
+  = hiddenNameStartsWith name "Indirect"
+
 
 -- | Create an open tag name from a constructor name in an open type
 toOpenTagName :: Name -> Name

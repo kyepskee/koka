@@ -26,7 +26,7 @@ import Debug.Trace
 -- import Type.Pretty
 
 import Data.Char(isAlphaNum)
-import Data.List(groupBy,intersperse,nubBy,sortOn)
+import Data.List(groupBy,intersperse,nubBy,sortOn,partition)
 import Data.Maybe(catMaybes)
 import Control.Monad(when)
 
@@ -36,13 +36,14 @@ import Common.Unique( uniqueId, setUnique, unique )
 import Common.Error
 import Common.ColorScheme( ColorScheme, colorType, colorSource, colorCons )
 import Common.Range
-import Common.Syntax( Platform(..) )
+import Common.Syntax( Platform(..), dataDefIsLazy )
 import Common.Name
 import Common.NamePrim
 import Common.Syntax
 import Common.File( startsWith )
 import qualified Common.NameMap as M
 import Syntax.Syntax
+import Syntax.RangeMap
 import qualified Core.Core as Core
 
 import Kind.ImportMap
@@ -61,9 +62,6 @@ import Type.Kind( getKind )
 import Kind.InferKind
 import Kind.InferMonad
 import Kind.Unify
-
-import Syntax.RangeMap
-
 
 {--------------------------------------------------------------------------
   Kindcheck a program and calculate types
@@ -343,8 +341,10 @@ infTypeDefGroup (TypeDefRec tdefs)
 infTypeDefGroup (TypeDefNonRec tdef)
   = infTypeDefs False [tdef]
 
-infTypeDefs isRec tdefs
-  = do -- trace ("infTypeDefs: " ++ show (length tdefs)) $ return ()
+infTypeDefs :: Bool -> [TypeDef UserType UserType UserKind] -> KInfer Core.TypeDefGroup
+infTypeDefs isRec tdefs0
+  = do tdefs <- mapM addLazyIndirect tdefs0
+       -- trace ("infTypeDefs: " ++ show (length tdefs)) $ return ()
        xinfgamma <- mapM bindTypeDef tdefs -- set up recursion
        let infgamma = map fst (filter snd xinfgamma)
        ctdefs   <- withDataEffects (concatMap getDataEffect (zip infgamma tdefs)) $ -- make effect types visible for lifting to handled
@@ -689,14 +689,14 @@ unifyBinder tbinder defbinder range infgamma reskind
 typeBinderKind (TypeBinder name kind _ _) = kind
 
 infConstructor :: UserCon UserType UserType UserKind -> KInfer (UserCon (KUserType InfKind) UserType InfKind)
-infConstructor (UserCon name exist params mbresult rngName rng vis doc)
+infConstructor (UserCon name exist params mbresult mblazy rngName rng vis doc)
   = do infgamma <- mapM bindTypeBinder exist
        params'  <- extendInfGamma infgamma (mapM infConValueBinder params)
        result'  <- case mbresult of
                      Nothing -> return Nothing
                      Just tp -> do tp' <- extendInfGamma infgamma $ infUserType infKindStar (Check "Constructor results must be values" rng) tp
                                    return (Just tp')
-       return (UserCon name infgamma params' result' rngName rng vis doc)
+       return (UserCon name infgamma params' result' mblazy rngName rng vis doc)
 
 infConValueBinder :: (Visibility,ValueBinder UserType (Maybe (Expr UserType))) -> KInfer (Visibility,ValueBinder (KUserType InfKind) (Maybe (Expr UserType)))
 infConValueBinder (vis,ValueBinder name tp mbExpr nameRng rng)
@@ -814,6 +814,44 @@ infParam expected context (name,tp)
   = do tp' <- infUserType expected context tp
        return (name,tp')
 
+-- Add indirection constructor to a lazy datatype
+addLazyIndirect (DataType newtp targs constructors range vis sort ddef dataEff isExtend doc)
+  | any userConIsLazy constructors || dataDefIsLazy ddef
+  = do let (lazyCons,strictCons) = partition userConIsLazy constructors
+           rng                 = tbinderNameRange newtp
+           makeTpApp t targs   = if null targs then t else TpApp t targs rng
+           indirectPar         = ValueBinder (newName "indirect")
+                                             (makeTpApp (TpCon (tbinderName newtp) rng)
+                                                        [TpVar (tbinderName targ) (tbinderNameRange targ) | targ <- targs ])
+                                             Nothing rng rng
+           indirectCon         = UserCon (toLazyIndirectConName (tbinderName newtp)) []
+                                          [(Private,indirectPar)]
+                                          Nothing Nothing rng rng Public
+                                          "// automatically generated lazy indirection constructor"
+
+           -- order with lazy last (so we can check quickly at runtime)
+           newConstructors     = strictCons ++ [indirectCon] ++ lazyCons
+           validDdef           = case ddef of
+                                   DataDefAuto{} -> True
+                                   DataDefNormal -> True
+                                   DataDefLazy   -> True
+                                   _             -> False
+
+       when (not validDdef) $
+         addError rng $ text "Cannot add lazy constructors to a" <+> text (show ddef) <+> text "type"
+
+       return (DataType newtp targs newConstructors range vis sort DataDefLazy dataEff isExtend doc)
+
+addLazyIndirect td
+  = return td
+
+userConIsLazy :: UserCon t u k -> Bool
+userConIsLazy userCon
+  = case userConLazy userCon of
+      Just _  -> True
+      Nothing -> isLazyIndirectConName (userconName userCon)
+
+
 checkQuant range  = Check "Can only quantify over types" range
 checkPred range   = Check "The left-hand side of a \"=>\" can only contain predicates" range
 checkArg range    = Check "The parameters of a function type must be types" range
@@ -930,7 +968,7 @@ resolveTypeDef isRec recNames (DataType newtp params constructors range vis sort
        addRangeInfo range (Decl declaration (getName newtp') (mangleTypeName (getName newtp')) Nothing)
        return (Core.Data dataInfo isExtend)
   where
-    conVis (UserCon name exist params result rngName rng vis _) = vis
+    conVis (UserCon name exist params result mblazy rngName rng vis _) = vis
 
 occursNegativeCon :: [Name] -> ConInfo -> Bool
 occursNegativeCon names conInfo
@@ -986,7 +1024,7 @@ resolveKind infkind
     resolve (KIApp k1 k2) = KApp (resolve k1) (resolve k2)
 
 resolveConstructor :: Name -> DataKind -> Bool -> Type -> [TypeVar] -> M.NameMap TypeVar -> UserCon (KUserType InfKind) UserType InfKind -> KInfer (UserCon Type Type Kind, ConInfo)
-resolveConstructor typeName typeSort isSingleton typeResult typeParams idmap (UserCon name exist params mbResult rngName rng vis doc)
+resolveConstructor typeName typeSort isSingleton typeResult typeParams idmap (UserCon name exist params mbResult mblazy rngName rng vis doc)
   = do qname  <- qualifyDef name
        exist' <- mapM (resolveTypeBinder doc) exist
        existVars <- mapM (\ename -> freshTypeVar ename Bound) exist'
@@ -995,6 +1033,10 @@ resolveConstructor typeName typeSort isSingleton typeResult typeParams idmap (Us
        result' <- case mbResult of
                     Nothing -> return $ typeApp typeResult (map TVar typeParams)
                     Just tp -> resolveType idmap' False tp
+       mblazy' <- case mblazy of
+                    Nothing -> return Nothing
+                    Just e  -> do e' <- infExpr e
+                                  return (Just e')
        let scheme = quantifyType (typeParams ++ existVars) $
                     if (null params') then result' else typeFun [(binderName p, binderType p) | (_,p) <- params'] typeTotal result'
        addRangeInfo rng (Decl "con" qname (mangleConName qname) (Just scheme))
@@ -1003,9 +1045,9 @@ resolveConstructor typeName typeSort isSingleton typeResult typeParams idmap (Us
        --    emitError makeMsg = do cs <- getColorScheme
        --                           let nameDoc = color (colorCons cs) (pretty name)
        --                           addError rng (makeMsg nameDoc)
-       platform <- getPlatform
+       -- platform <- getPlatform
        -- (orderedFields,vrepr) <- orderConFields emitError lookupDataInfo platform (if isOpen then 1 else 0) fields
-       return (UserCon qname exist' params' (Just result') rngName rng vis doc
+       return (UserCon qname exist' params' (Just result') mblazy' rngName rng vis doc
               ,ConInfo qname typeName typeParams existVars
                   fields
                   scheme
