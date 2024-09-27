@@ -54,10 +54,6 @@
 typedef enum kk_tag_e {
   KK_TAG_INVALID   = 0,
   KK_TAG_MIN       = 1,
-
-  KK_TAG_LAZY      = 0x0400,
-  KK_TAG_LAZY_INDIRECT = KK_TAG_LAZY,
-
   KK_TAG_MAX       = 0xFFC0,   // space for 64 special tags
   KK_TAG_OPEN,        // open datatype, first field is a string tag
   KK_TAG_BOX,         // boxed value type

@@ -35,30 +35,31 @@ static bool kk_header_compare_and_swap(kk_header_t* dest /*out*/, kk_header_t* e
 }
 
 
-static void kk_lazy_atomic_wait(kk_block_t* b, kk_context_t* ctx) {
+static void kk_lazy_atomic_wait(kk_block_t* b, int32_t indirect_tag, kk_context_t* ctx) {
   // TODO: if we eval recursively, we could busy wait on ourselves
   kk_assert(kk_block_is_thread_shared(b));
+  kk_unused(indirect_tag);
   kk_header_t header;
   do {
     kk_atomic_yield(); // TODO: improve the busy wait
     kk_header_atomic_load_acquire(&header, &b->header);
   } while (header._field_idx == KK_FIELD_IDX_LAZY_BLOCKED);
-  kk_assert(header.tag <= KK_TAG_LAZY_INDIRECT);
+  kk_assert(header.tag <= indirect_tag);
 }
 
-kk_decl_export bool kk_lazy_atomic_enter(kk_datatype_t lazy /* borrow */, kk_context_t* ctx) {
-  kk_block_t* b = kk_datatype_as_ptr(lazy, ctx);
+kk_decl_export bool kk_lazy_atomic_enter(kk_datatype_t lazy /* borrow */, int32_t indirect_tag, kk_context_t* ctx) {
+  kk_block_t* b = kk_datatype_as_ptr(kk_datatype_unbox(lazy),ctx);
   kk_assert(kk_block_is_thread_shared(b));
   kk_header_t blocked_header;
   kk_header_t header;
   kk_header_atomic_load_relaxed(&header, &b->header);
   do {
-    if (header.tag <= KK_TAG_LAZY_INDIRECT) {
+    if (header.tag <= indirect_tag) {
       // already eval'd
       return false;
     }
     else if (header._field_idx == KK_FIELD_IDX_LAZY_BLOCKED) {
-      kk_lazy_atomic_wait(b,ctx);
+      kk_lazy_atomic_wait(b,indirect_tag,ctx);
       return false;
     }
     kk_assert(header.tag <= KK_TAG_MAX);
@@ -69,7 +70,7 @@ kk_decl_export bool kk_lazy_atomic_enter(kk_datatype_t lazy /* borrow */, kk_con
 }
 
 kk_decl_export void kk_lazy_atomic_unblock(kk_datatype_t lazy /* own */, kk_context_t* ctx) {
-  kk_block_t* b = kk_datatype_as_ptr(lazy, ctx);
+  kk_block_t* b = kk_datatype_as_ptr(kk_datatype_unbox(lazy),ctx);
   kk_assert(kk_block_is_thread_shared(b));
   kk_header_t unblocked_header;
   kk_header_t header;

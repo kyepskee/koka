@@ -92,7 +92,7 @@ inferKinds
 inferKinds isValue colors platform mbRangeMap imports kgamma0 syns0 data0
             (Program source modName nameRange tdgroups defs importdefs externals fixdefs doc)
   =do unique0 <- unique
-      let (errs1,warns1,rm1,unique1,(cgroups,kgamma1,syns1,data1)) = runKindInfer colors platform mbRangeMap modName imports kgamma0 syns0 data0 unique0 (infTypeDefGroups tdgroups)
+      let (errs1,warns1,rm1,unique1,(cgroups,kgamma1,syns1,data1,lazyExprs)) = runKindInfer colors platform mbRangeMap modName imports kgamma0 syns0 data0 unique0 (infTypeDefGroups tdgroups)
           (errs2,warns2,rm2,unique2,externals1)              = runKindInfer colors platform rm1 modName imports kgamma1 syns1 data1 unique1 (infExternals externals)
           (errs3,warns3,rm3,unique3,defs1)                   = runKindInfer colors platform rm2 modName imports kgamma1 syns1 data1 unique2 (infDefGroups defs)
           (_,_,rm4,_,_) = runKindInfer colors platform rm3 modName imports kgamma1 syns1 data1 unique3 (infImports modName nameRange importdefs)
@@ -104,7 +104,7 @@ inferKinds isValue colors platform mbRangeMap imports kgamma0 syns0 data0
           errs4     = constructorCheckDuplicates colors conInfos
           warns     = [warningMessageKind ErrKind rng doc | (rng,doc) <- warns1 ++ warns2 ++ warns3]
           errs      = [errorMessageKind ErrKind rng doc  | (rng,doc) <- errs1 ++ errs2 ++ errs3 ++ errs4]
-          dgroups   = concatMap (synTypeDefGroup modName) cgroups
+          dgroups   = concatMap (synTypeDefGroup modName lazyExprs) cgroups
       setUnique unique3
       Core.liftError  (addWarnings warns $
                         if (null errs)
@@ -143,14 +143,16 @@ extractInfos groups
 {---------------------------------------------------------------
 
 ---------------------------------------------------------------}
-synTypeDefGroup :: Name -> Core.TypeDefGroup -> DefGroups Type
-synTypeDefGroup modName (Core.TypeDefGroup ctdefs)
-  = concatMap (synTypeDef modName) ctdefs
+type LazyExpr = (Name,Expr Type)
 
-synTypeDef :: Name -> Core.TypeDef -> DefGroups Type
-synTypeDef modName (Core.Synonym synInfo) = []
-synTypeDef modName (Core.Data dataInfo) | isHiddenName (dataInfoName dataInfo) = []
-synTypeDef modName (Core.Data dataInfo)
+synTypeDefGroup :: Name -> [LazyExpr] -> Core.TypeDefGroup -> DefGroups Type
+synTypeDefGroup modName lazyExprs (Core.TypeDefGroup ctdefs)
+  = concatMap (synTypeDef modName lazyExprs) ctdefs
+
+synTypeDef :: Name -> [LazyExpr] -> Core.TypeDef -> DefGroups Type
+synTypeDef modName lazyExprs (Core.Synonym synInfo) = []
+synTypeDef modName lazyExprs (Core.Data dataInfo) | isHiddenName (dataInfoName dataInfo) = []
+synTypeDef modName lazyExprs (Core.Data dataInfo)
   = (if not (dataInfoIsOpen dataInfo) then synAccessors modName dataInfo else [])
     ++
     (if (length (dataInfoConstrs dataInfo) == 1 && not (dataInfoIsOpen dataInfo)
@@ -168,7 +170,7 @@ synTypeDef modName (Core.Data dataInfo)
       else [])
     ++
     (if (dataDefIsLazy (dataInfoDef dataInfo))
-      then [synIndirectTag dataInfo]
+      then [synLazyTag dataInfo,synLazyForce lazyExprs dataInfo]
       else [])
 
 
@@ -285,41 +287,101 @@ synConstrTag (con)
         expr = Lit (LitString (show (conInfoName con)) rc)
     in DefNonRec (Def (ValueBinder name () expr rc rc) rc (conInfoVis con) DefVal InlineNever "")
 
-synIndirectTag :: DataInfo -> DefGroup Type
-synIndirectTag info
+synLazyTag :: DataInfo -> DefGroup Type
+synLazyTag info
   = let xrng     = dataInfoRange info
         rng      = rangeHide xrng
         dataName = unqualify $ dataInfoName info
         defName  = qualifyLocally (nameAsModuleName dataName) (newName "lazy-tag")
-        indirectTag = case find (isLazyIndirectConName . conInfoName) (dataInfoConstrs info) of
-                        Nothing  -> failure $ "Kind.Infer.synIsWhnf: no indirection constructor found: " ++ show (dataInfoName info)
-                        Just ind -> conInfoTag ind
-        expr      = App (Var nameInternalInt32 False rng) [(Nothing,Lit (LitInt (toInteger indirectTag) rng))] rng
+        lazyTag  = case find (isLazyIndirectConName . conInfoName) (dataInfoConstrs info) of
+                      Nothing  -> failure $ "Kind.Infer.synIsWhnf: no indirection constructor found: " ++ show (dataInfoName info)
+                      Just ind -> conInfoTag ind
+        expr      = App (Var nameInternalInt32 False rng) [(Nothing,Lit (LitInt (toInteger lazyTag) rng))] rng
     in DefNonRec (Def (ValueBinder defName () expr rng rng) rng (dataInfoVis info) DefVal InlineAlways "// Automatically generated tag value of lazy indirection")
 
+synLazyForce :: [LazyExpr] -> DataInfo -> DefGroup Type
+synLazyForce lazyExprs info
+  = DefRec (map (\f -> f info) [synLazyEval lazyExprs,synLazyWhnf])
 
-synIsWhnf :: DataInfo -> DefGroup Type
-synIsWhnf info
+{-
+noinline fun stream-eval( s : stream<a> ) : _ stream<a>
+  lazy-whnf-target(s)
+  match s
+    SAppRev( pre, post ) -> ...
+    SIndirect(ind)       -> stream-eval(pretend-decreasing(ind))
+    _                    -> s
+-}
+synLazyEval :: [LazyExpr] -> DataInfo -> Def Type
+synLazyEval lazyExprs info
   = let xrng     = dataInfoRange info
         rng      = rangeHide xrng
 
-        dataName = unqualify $ dataInfoName info
-        defName  = qualifyLocally (nameAsModuleName dataName) (newName "is-whnf")
-        indirectTag = case find (isLazyIndirectConName . conInfoName) (dataInfoConstrs info) of
-                        Nothing  -> failure $ "Kind.Infer.synIsWhnf: no indirection constructor found: " ++ show (dataInfoName info)
-                        Just ind -> conInfoTag ind
+        defName  = lazyName info "eval"
+
+        lazyConstrs  = filter conInfoIsLazy (dataInfoConstrs info)
 
         dataTp    = typeApp (TCon (TypeCon (dataInfoName info) (dataInfoKind info))) (map TVar (dataInfoParams info))
-        fullTp    = tForall (dataInfoParams info) [] (typeFun [(arg,dataTp)] typeTotal typeBool)
+        fullTp    = tForall (dataInfoParams info) [] (typeFun [(nameNil,dataTp)] typePure dataTp )
+        argName   = newName "x"
+        arg       = Var argName False rng
+        expr      = Ann (Lam [ValueBinder argName Nothing Nothing rng rng] (body) xrng) fullTp xrng
+        mark      = Def (ValueBinder nameNil () (App (Var (newName "lazy-whnf-target") False rng) [(Nothing,arg)] rng) rng rng) rng Private DefVal InlineNever ""
+        body      = Case arg (map branch lazyConstrs ++
+                              [Branch (PatWild rng) [Guard guardTrue arg]]) rng
+        branch conInfo | isLazyIndirectConName (conInfoName conInfo)
+           = let [(par,tp)] = conInfoParams conInfo
+             in Branch (PatCon (conInfoName conInfo) [(Nothing,PatVar (ValueBinder par Nothing (PatWild rng) rng rng))] rng rng)
+                        [Guard guardTrue (Var par False rng)]
+        branch conInfo
+          = Branch (PatCon (conInfoName conInfo) [(Nothing,PatVar (ValueBinder par Nothing (PatWild rng) rng rng)) | (par,_) <- conInfoParams conInfo] rng rng)
+                   [Guard guardTrue (branchExpr (conInfoName conInfo))]
 
-        alwaysPtr = all (\conInfo -> not (null (conInfoParams conInfo))) (dataInfoConstrs info)
+        branchExpr cname
+          = case lookup cname lazyExprs of
+              Just lazyExpr -> lazyExpr
+              Nothing -> failure $ "Kind.Infer.synLazyEval.branchExpr: cannot find expression for lazy constructor " ++ show cname
 
-        arg       = unqualify $ dataInfoName info
-        expr      = Ann (Lam [ValueBinder arg Nothing Nothing rng rng] testExpr rng) fullTp xrng
-        testExpr  = App (Var (newName (if alwaysPtr then "kk-datatype-is-whnf" else "kk-datatype-ptr-is-whnf")) False rng)
-                        [(Nothing,Var arg False rng), (Nothing,tagExpr)] rng
-        tagExpr   = App (Var nameInternalInt32 False rng) [(Nothing,Lit (LitInt (toInteger indirectTag) rng))] rng
-    in DefNonRec (Def (ValueBinder defName () expr rng rng) rng (dataInfoVis info) (DefFun [Borrow] (Fip (AllocAtMost 0))) InlineAlways "")
+    in (Def (ValueBinder defName () expr rng rng) rng (dataInfoVis info) (DefFun [] (Fip (AllocAtMost 0))) InlineNever "")
+
+{-
+noinline fun stream-whnf( s : stream<a> ) : _ stream<a>
+  if kk-datatype-ptr-is-thread-shared(s) && lazy-atomic-enter(s,stream/lazy-tag) then
+    val v = stream-eval(s)
+    lazy-atomic-unblock(s)
+    v
+  else
+    stream-eval(s)
+-}
+synLazyWhnf :: DataInfo -> Def Type
+synLazyWhnf info
+  = let xrng     = dataInfoRange info
+        rng      = rangeHide xrng
+        defName  = lazyName info "whnf"
+        dataTp   = typeApp (TCon (TypeCon (dataInfoName info) (dataInfoKind info))) (map TVar (dataInfoParams info))
+        fullTp   = tForall (dataInfoParams info) [] (typeFun [(nameNil,dataTp)] typePure dataTp )
+        prefix   = if (all (\conInfo -> not (null (conInfoParams conInfo))) (dataInfoConstrs info))
+                     then "kk-datatype-" else "kk-datatype-ptr-"
+
+        argName   = newName "x"
+        arg       = Var argName False rng
+        expr      = Ann (Lam [ValueBinder argName Nothing Nothing rng rng] body xrng) fullTp xrng
+        body      = Case tst [Branch (PatCon nameTrue [] rng rng) [Guard guardTrue texpr]
+                             ,Branch (PatCon nameFalse [] rng rng) [Guard guardTrue eval]] rng
+        tst       = App (Var nameAnd False rng)
+                     [(Nothing,App (Var (newName "kk-datatype-ptr-is-thread-shared") False rng) [(Nothing,arg)] rng),
+                      (Nothing,App (Var (newName "lazy-atomic-enter") False rng) [(Nothing,arg),(Nothing,Var (lazyName info "lazy-tag") False rng)] rng)] rng
+        eval      = App (Var (lazyName info "eval") False rng) [(Nothing,arg)] rng
+        texpr     = let v = newName "v"
+                        vdef = Def (ValueBinder v () eval rng rng) rng Private DefVal InlineNever ""
+                        bdef = Def (ValueBinder nameNil () (App (Var (newName "lazy-atomic-unblock") False rng) [(Nothing,arg)] rng) rng rng) rng Private DefVal InlineNever ""
+                    in Bind vdef (Bind bdef (Var v False rng) rng) rng
+    in (Def (ValueBinder defName () expr rng rng) rng (dataInfoVis info) (DefFun [] (Fip (AllocAtMost 0))) InlineNever "")
+
+lazyName :: DataInfo -> String -> Name
+lazyName info stem
+  = let dataName = unqualify $ dataInfoName info
+    in qualifyLocally (nameAsModuleName dataName) (newName stem)
+
 
 {---------------------------------------------------------------
   Types for constructors
@@ -359,11 +421,11 @@ infImport (Import alias qname aliasRange nameRange range vis isOpen)
 {---------------------------------------------------------------
   Infer kinds for type definition groups
 ---------------------------------------------------------------}
-infTypeDefGroups :: [TypeDefGroup UserType UserKind] -> KInfer ([Core.TypeDefGroup],KGamma,Synonyms,Newtypes)
+infTypeDefGroups :: [TypeDefGroup UserType UserKind] -> KInfer ([Core.TypeDefGroup],KGamma,Synonyms,Newtypes,[LazyExpr])
 infTypeDefGroups (tdgroup:tdgroups)
-  = do (ctdgroup)  <- infTypeDefGroup tdgroup
-       (ctdgroups,kgamma,syns,datas) <- extendKGamma (getRanges tdgroup) ctdgroup $ infTypeDefGroups tdgroups
-       return (ctdgroup:ctdgroups,kgamma,syns,datas)
+  = do (ctdgroup,lazyExprs)  <- infTypeDefGroup tdgroup
+       (ctdgroups,kgamma,syns,datas,lazyExprss) <- extendKGamma (getRanges tdgroup) ctdgroup $ infTypeDefGroups tdgroups
+       return (ctdgroup:ctdgroups,kgamma,syns,datas,lazyExprs ++ lazyExprss)
   where
     getRanges (TypeDefRec tdefs)   = map getRange tdefs
     getRanges (TypeDefNonRec tdef) = [getRange tdef]
@@ -372,29 +434,30 @@ infTypeDefGroups []
   = do kgamma <- getKGamma
        syns <- getSynonyms
        datas <- getAllNewtypes
-       return ([],kgamma,syns,datas)
+       return ([],kgamma,syns,datas,[])
 
-infTypeDefGroup :: TypeDefGroup UserType UserKind -> KInfer (Core.TypeDefGroup)
+infTypeDefGroup :: TypeDefGroup UserType UserKind -> KInfer (Core.TypeDefGroup,[LazyExpr])
 infTypeDefGroup (TypeDefRec tdefs)
   = infTypeDefs True tdefs
 
 infTypeDefGroup (TypeDefNonRec tdef)
   = infTypeDefs False [tdef]
 
-infTypeDefs :: Bool -> [TypeDef UserType UserType UserKind] -> KInfer Core.TypeDefGroup
+infTypeDefs :: Bool -> [TypeDef UserType UserType UserKind] -> KInfer (Core.TypeDefGroup,[LazyExpr])
 infTypeDefs isRec tdefs0
   = do tdefs <- mapM addLazyIndirect tdefs0
        -- trace ("infTypeDefs: " ++ show (length tdefs)) $ return ()
        xinfgamma <- mapM bindTypeDef tdefs -- set up recursion
        let infgamma = map fst (filter snd xinfgamma)
-       ctdefs   <- withDataEffects (concatMap getDataEffect (zip infgamma tdefs)) $ -- make effect types visible for lifting to handled
+       ctdefs' <- withDataEffects (concatMap getDataEffect (zip infgamma tdefs)) $ -- make effect types visible for lifting to handled
                    extendInfGamma infgamma $ -- extend inference gamma, also checks for duplicates
                    do let names = map tbinderName infgamma
                       tdefs1 <- -- trace ("recursive group: " ++ show infgamma) $
                                 mapM infTypeDef (zip (map fst xinfgamma) tdefs)
                       mapM (resolveTypeDef isRec names) tdefs1
        checkRecursion tdefs -- check for recursive type synonym definitions rather late so we spot duplicate definitions first
-       return (Core.TypeDefGroup ctdefs)
+       let (ctdefs,lazyExprss) = unzip ctdefs'
+       return (Core.TypeDefGroup ctdefs, concat lazyExprss)
     where
       getDataEffect (tbind, DataType{ typeDefEffect = deff }) = [(tbinderName tbind, deff)]
       getDataEffect _ = []
@@ -905,7 +968,8 @@ checkExtendLabel r= Check "The elements of an effect must be effect constants" r
 {---------------------------------------------------------------
   Resolve kinds: from InfKind to Kind, and UserType to Type
 ---------------------------------------------------------------}
-resolveTypeDef :: Bool -> [Name] -> TypeDef (KUserType InfKind) UserType InfKind -> KInfer (Core.TypeDef)
+
+resolveTypeDef :: Bool -> [Name] -> TypeDef (KUserType InfKind) UserType InfKind -> KInfer (Core.TypeDef,[LazyExpr])
 resolveTypeDef isRec recNames (Synonym syn params tp range vis doc)
   = do syn' <- resolveTypeBinderDef doc syn
        params' <- mapM (resolveTypeBinder "") params
@@ -927,7 +991,7 @@ resolveTypeDef isRec recNames (Synonym syn params tp range vis doc)
        addRangeInfo range (Decl "alias" (getName syn') (mangleTypeName (getName syn')) (Just tp'))
        let synInfo = SynInfo (getName syn') (typeBinderKind syn') etaParams etaTp (maxSynonymRank etaTp + 1) range vis doc
        addSynonym synInfo
-       return (Core.Synonym synInfo)
+       return (Core.Synonym synInfo,[])
   where
     kindArity (KApp (KApp kcon k1) k2)  | kcon == kindArrow = k1 : kindArity k2
     kindArity _ = []
@@ -957,7 +1021,7 @@ resolveTypeDef isRec recNames (DataType newtp params constructors range vis sort
        consinfos <- mapM (resolveConstructor (getName newtp') sort
                             (not (dataDefIsOpen ddef) && length constructors == 1)
                             typeResult typeVars tvarMap) (zip constructors [1..])  -- constructor tags start at 1
-       let (constructors',conInfos0) = unzip consinfos
+       let (lazyExprss,conInfos0) = unzip consinfos
 
        --check recursion
        if (sort == Retractive)
@@ -1006,7 +1070,7 @@ resolveTypeDef isRec recNames (DataType newtp params constructors range vis sort
        let declaration = (if sort /= Inductive then "" else (if dataDefIsValue ddef1 then "value " else "reference "))
                           ++ show sort
        addRangeInfo range (Decl declaration (getName newtp') (mangleTypeName (getName newtp')) Nothing)
-       return (Core.Data dataInfo)
+       return (Core.Data dataInfo, concat lazyExprss)
   where
     conVis (UserCon name exist params result mblazy rngName rng vis _) = vis
 
@@ -1063,7 +1127,7 @@ resolveKind infkind
     resolve (KICon kind) = kind
     resolve (KIApp k1 k2) = KApp (resolve k1) (resolve k2)
 
-resolveConstructor :: Name -> DataKind -> Bool -> Type -> [TypeVar] -> M.NameMap TypeVar -> (UserCon (KUserType InfKind) UserType InfKind,Int) -> KInfer (UserCon Type Type Kind, ConInfo)
+resolveConstructor :: Name -> DataKind -> Bool -> Type -> [TypeVar] -> M.NameMap TypeVar -> (UserCon (KUserType InfKind) UserType InfKind,Int) -> KInfer ([(Name,Expr Type)] {-UserCon Type Type Kind-}, ConInfo)
 resolveConstructor typeName typeSort isSingleton typeResult typeParams idmap (UserCon name exist params mbResult mblazy rngName rng vis doc,tag)
   = do qname  <- qualifyDef name
        exist' <- mapM (resolveTypeBinder doc) exist
@@ -1077,6 +1141,10 @@ resolveConstructor typeName typeSort isSingleton typeResult typeParams idmap (Us
                     Nothing -> return Nothing
                     Just e  -> do e' <- infExpr e
                                   return (Just e')
+       lazyExpr <- case mblazy' of
+                     Nothing -> return []
+                     Just e  -> return [(qname,e)]
+
        let scheme = quantifyType (typeParams ++ existVars) $
                     if (null params') then result' else typeFun [(binderName p, binderType p) | (_,p) <- params'] typeTotal result'
        addRangeInfo rng (Decl "con" qname (mangleConName qname) (Just scheme))
@@ -1087,7 +1155,7 @@ resolveConstructor typeName typeSort isSingleton typeResult typeParams idmap (Us
        --                           addError rng (makeMsg nameDoc)
        -- platform <- getPlatform
        -- (orderedFields,vrepr) <- orderConFields emitError lookupDataInfo platform (if isOpen then 1 else 0) fields
-       return (UserCon qname exist' params' (Just result') mblazy' rngName rng vis doc
+       return (lazyExpr -- UserCon qname exist' params' (Just result') mblazy' rngName rng vis doc
               ,ConInfo qname typeName typeParams existVars
                   fields
                   scheme
