@@ -299,6 +299,44 @@ pub fun @default-utc( action : () -> <utc|e> a) : e a
   with fun utc() { ts-ti }
   action()
 
+
+// -----------------------------------------------------------
+// Leap second table
+// -----------------------------------------------------------
+
+// `:utc-timestamp` is UTC time since 2000-01-01
+pub alias utc-timestamp = timestamp
+
+// A leap second table describes when UTC leap seconds occur.
+abstract struct leaps-table(
+  pub expire : instant,
+  // List of adjustments, ordered from most recent to oldest (decreasing `utc-start`)
+  // Each entry gives the start instant and integer leap second adjustment.
+  adjusts: list<leap-adjust>
+)
+
+// Leap second adjustments. For an instant `i` after `start`:\
+// ``TAI-offset = offset + (drift * days(i - drift-start))``
+abstract struct leap-adjust(
+  utc-start  : utc-timestamp,  // start time in NTP seconds since epoch (2000-01-01)
+  offset     : timespan,       // base offset
+  drift-start: utc-timestamp = timestamp0,   // start of drift adjustment
+  drift      : ddouble = ddouble/zero
+)
+
+
+val leaps-table0 = Leaps-table(epoch,[])
+val zero : leap-adjust = Leap-adjust(timestamp0,timespan0,timestamp0,zero)
+
+fun is-zero( la : leap-adjust ) : bool
+  la.offset.is-zero && la.drift.is-zero
+
+pub fun leap-adjust/show( l : leap-adjust ) : string
+  [l.utc-start.show,": offset: ",l.offset.show,", drift-start: ",l.drift-start.show,", drift: ",l.drift.show].join
+
+pub fun leaps-table/show( t : leaps-table ) : string
+  t.adjusts.map(show).unlines
+
 /*----------------------------------------------------------------------------
   Unix and NTP timestamps
 ----------------------------------------------------------------------------*/
@@ -618,42 +656,6 @@ fun utc-sls-to-tai( leaps : leaps-table, smooth : timespan, sls : utc-timestamp 
   utc-to-tai(leaps,utc)
 
 
-// -----------------------------------------------------------
-// Leap second table
-// -----------------------------------------------------------
-
-// `:utc-timestamp` is UTC time since 2000-01-01
-pub alias utc-timestamp = timestamp
-
-// A leap second table describes when UTC leap seconds occur.
-abstract struct leaps-table(
-  pub expire : instant,
-  // List of adjustments, ordered from most recent to oldest (decreasing `utc-start`)
-  // Each entry gives the start instant and integer leap second adjustment.
-  adjusts: list<leap-adjust>
-)
-
-// Leap second adjustments. For an instant `i` after `start`:\
-// ``TAI-offset = offset + (drift * days(i - drift-start))``
-abstract struct leap-adjust(
-  utc-start  : utc-timestamp,  // start time in NTP seconds since epoch (2000-01-01)
-  offset     : timespan,       // base offset
-  drift-start: utc-timestamp = timestamp0,   // start of drift adjustment
-  drift      : ddouble = ddouble/zero
-)
-
-val leaps-table0 = Leaps-table(epoch,[])
-val zero : leap-adjust = Leap-adjust(timestamp0,timespan0,timestamp0,zero)
-
-fun is-zero( la : leap-adjust ) : bool
-  la.offset.is-zero && la.drift.is-zero
-
-pub fun leap-adjust/show( l : leap-adjust ) : string
-  [l.utc-start.show,": offset: ",l.offset.show,", drift-start: ",l.drift-start.show,", drift: ",l.drift.show].join
-
-pub fun leaps-table/show( t : leaps-table ) : string
-  t.adjusts.map(show).unlines
-
 /*----------------------------------------------------------------------------
   delta-TAI == TAI - UTC
 ----------------------------------------------------------------------------*/
@@ -710,7 +712,7 @@ pub fun extend(leap1 : leaps-table, leap2 : leaps-table) : leaps-table
 
 
 fun upto( lt : leaps-table, end : utc-timestamp ) : leaps-table
-  lt( adjusts = lt.adjusts.drop-while(fn(la) { la.utc-start > end }) )
+  lt(adjusts = lt.adjusts.drop-while(fn(la) { la.utc-start > end }) )
 
 // Get a list of leap second steps in a triple, NTP start time, offset just before, and the new offset at that time,
 // the base offset, the drift start date and the drift rate.

@@ -46,6 +46,8 @@ import Syntax.Syntax
 import Syntax.RangeMap
 import qualified Core.Core as Core
 
+import Static.BindingGroups( groupTypeDefBindings, groupBindings )
+
 import Kind.ImportMap
 import Kind.Kind
 import Kind.Assumption
@@ -65,6 +67,7 @@ import Kind.Unify
 
 {--------------------------------------------------------------------------
   Kindcheck a program and calculate types
+  Also groups recursive type and expressing bindings in order.
 --------------------------------------------------------------------------}
 -- | Kindcheck a program and calculate types
 inferKinds
@@ -90,25 +93,29 @@ inferKinds
            , Maybe RangeMap
            )
 inferKinds isValue colors platform mbRangeMap imports kgamma0 syns0 data0
-            (Program source modName nameRange tdgroups defs importdefs externals fixdefs doc)
+            (Program source modName nameRange tdefs defs importdefs externals fixdefs doc)
   =do unique0 <- unique
-      let (errs1,warns1,rm1,unique1,(cgroups,kgamma1,syns1,data1,lazyExprs)) = runKindInfer colors platform mbRangeMap modName imports kgamma0 syns0 data0 unique0 (infTypeDefGroups tdgroups)
+      let -- order and group recursive let-bindings
+          tdgroups0 = groupTypeDefBindings modName tdefs
+          (errs1,warns1,rm1,unique1,(tdgroups,kgamma1,syns1,data1,lazyExprs)) = runKindInfer colors platform mbRangeMap modName imports kgamma0 syns0 data0 unique0 (infTypeDefGroups tdgroups0)
           (errs2,warns2,rm2,unique2,externals1)              = runKindInfer colors platform rm1 modName imports kgamma1 syns1 data1 unique1 (infExternals externals)
           (errs3,warns3,rm3,unique3,defs1)                   = runKindInfer colors platform rm2 modName imports kgamma1 syns1 data1 unique2 (infDefGroups defs)
           (_,_,rm4,_,_) = runKindInfer colors platform rm3 modName imports kgamma1 syns1 data1 unique3 (infImports modName nameRange importdefs)
   --        (errs4,warns4,unique4,cgroups)                 = runKindInfer colors modName imports kgamma1 syns1 unique3 (infCoreTDGroups cgroups)
-          (synInfos,dataInfos) = unzipEither (extractInfos cgroups)
+          (synInfos,dataInfos) = unzipEither (extractInfos tdgroups)
           conInfos  = concatMap dataInfoConstrs dataInfos
           cons1     = constructorsFromList conInfos
           gamma1    = constructorGamma isValue dataInfos
           errs4     = constructorCheckDuplicates colors conInfos
           warns     = [warningMessageKind ErrKind rng doc | (rng,doc) <- warns1 ++ warns2 ++ warns3]
           errs      = [errorMessageKind ErrKind rng doc  | (rng,doc) <- errs1 ++ errs2 ++ errs3 ++ errs4]
-          dgroups   = concatMap (synTypeDefGroup modName lazyExprs) cgroups
+          synDefs   = concatMap (synTypeDefGroup modName lazyExprs) tdgroups
+          -- now order and group definitions including newly synthesized definitions for type definitions
+          dgroups   = groupBindings modName (synDefs ++ defs1)
       setUnique unique3
       Core.liftError  (addWarnings warns $
                         if (null errs)
-                          then return (dgroups ++ defs1
+                          then return (dgroups
                                       -- ,gamma1
                                       ,kgamma1
                                       ,syns1
@@ -116,7 +123,7 @@ inferKinds isValue colors platform mbRangeMap imports kgamma0 syns0 data0
                                       ,cons1
                                       -- ,cgroups
                                       -- ,externals1
-                                      ,Core.Core modName [] [] cgroups [] externals1 doc
+                                      ,Core.Core modName [] [] tdgroups [] externals1 doc
                                       ,rm4
                                       )
                           else errorMsgs errs)

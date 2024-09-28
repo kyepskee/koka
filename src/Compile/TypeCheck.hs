@@ -25,7 +25,6 @@ import qualified Common.NameSet as S
 import Syntax.RangeMap
 import Syntax.Syntax
 import Static.FixityResolve( fixitiesCompose, fixitiesNew, fixityResolve )
-import Static.BindingGroups( bindingGroups )
 import Core.Pretty( prettyDef )
 import Core.CoreVar( extractDepsFromSignatures )
 
@@ -64,9 +63,9 @@ typeCheck flags defs coreImports program0
         -- binding groups and fixities
         let fixities     = fixitiesNew [(name,fix) | FixDef name fix rng vis <- programFixDefs program0]
             coreFixities = [Core.FixDef name fix   | FixDef name fix rng vis <- programFixDefs program0, vis == Public]
-            program1 = bindingGroups program0
+
         (program2,_) <- Core.liftError $ fixityResolve (colorSchemeFromFlags flags)
-                                                        (fixitiesCompose (defsFixities defs) fixities) program1
+                                                        (fixitiesCompose (defsFixities defs) fixities) program0
 
         -- kind inference
         (progDefs, kgamma, synonyms, newtypes, constructors, coreProgram, mbRangeMap0)

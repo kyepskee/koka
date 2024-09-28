@@ -201,8 +201,10 @@ nameCopy        = newName "@copy"
 nameOpExpr      = newName "@opexpr"
 
 copyNameOf :: Name -> Name
-copyNameOf typename
-  = qualify (qualifier typename) (qualifyLocally (nameAsModuleName (unqualify typename)) nameCopy)
+copyNameOf typeName
+  = -- makeHiddenName "copy" typename
+    -- qualify (qualifier typename) (qualifyLocally (nameAsModuleName (unqualify typename)) nameCopy)
+    typeQualifiedNameOf typeName nameCopy
 
 nameIf          = newName "if"
 nameCase        = newName "case"

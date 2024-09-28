@@ -27,6 +27,7 @@ module Common.Name
 
           , newPaddingName, isPaddingName, isCCtxName
           , newFieldName, isFieldName, isWildcard
+          , typeQualifiedName, typeQualifiedNameOf, typeQualifiedGetTypeName
           , newHiddenExternalName, isHiddenExternalName
           , newHiddenName, isHiddenName, hiddenNameStartsWith
           , makeHiddenName, makeFreshHiddenName, newHiddenNameEx
@@ -115,6 +116,8 @@ type ModuleName = Name
 joinWith sep m n  = (if null m then n else if null n then m else m ++ sep ++ n)
 join m n          = joinWith "/" m n
 
+joins ms  = foldr join "" ms
+
 nameLocal :: Name -> String
 nameLocal (Name m _ l _ n _)
   = join l n
@@ -142,9 +145,9 @@ isSameNamespace name1 name2
   = (isConstructorName name1 == isConstructorName name2)
 
 lowerCompare (Name m1 _ l1 _ n1 _) (Name m2 _ l2 _ n2 _)
-  = case lowerCompareS m1 m2 of
+  = case lowerCompareS n1 n2 of
       EQ -> case lowerCompareS l1 l2 of
-              EQ -> lowerCompareS n1 n2
+              EQ -> lowerCompareS m1 m2
               lg -> lg
       lg -> lg
 
@@ -166,10 +169,11 @@ instance Eq Name where
 
 
 instance Ord Name where
+  -- compare module, stem name, and then local name for dependencies
   compare n1@(Name _ hm1 _ hl1 _ hn1) n2@(Name _ hm2 _ hl2 _ hn2)
     = case compare hm1 hm2 of
-        EQ -> case compare hl1 hl2 of
-                EQ -> case compare hn1 hn2 of
+        EQ -> case compare hn1 hn2 of
+                EQ -> case compare hl1 hl2 of
                         EQ -> lowerCompare n1 n2
                         lg -> lg
                 lg -> lg
@@ -189,6 +193,10 @@ labelNameCompare (Name m1 hm1 l1 hl1 n1 hn1) (Name m2 hm2 l2 hl2 n2 hn2)
               lg -> lg
       lg -> lg
 
+
+stemIsEqual :: Name -> Name -> Bool
+stemIsEqual (Name m1 _ l1 _ n1 hn1) (Name m2 _ l2 _ n2 hn2)
+  = (hn1 == hn2 && n1 == n2)
 
 isIdChar :: Char -> Bool
 isIdChar c
@@ -585,6 +593,23 @@ postpend post name
     in reverse (xs ++ reverse post ++ ys)
 
 
+typeQualifiedName :: Name -> String -> Name
+typeQualifiedName typeName stem
+  = qualify (qualifier typeName) $
+    qualifyLocally (nameAsModuleName (unqualify typeName)) $
+    newName stem
+
+typeQualifiedNameOf :: Name -> Name -> Name
+typeQualifiedNameOf typeName stem
+  = typeQualifiedName typeName (nameStem stem)
+
+typeQualifiedGetTypeName :: HasCallStack => Name -> Name
+typeQualifiedGetTypeName name
+  = case reverse (splitLocalQualName name) of
+      m:ms -> newLocallyQualified (nameModule name) (joins (reverse ms)) m
+      []   -> failure ("Common.Name.typeQualifiedGetTypeName: no locally qualified type: " ++ show name)
+
+
 ----------------------------------------------------------------
 -- hidden names
 ----------------------------------------------------------------
@@ -668,7 +693,9 @@ isHiddenExternalName name
 -- | Create a constructor creator name from the constructor name.
 -- Used if special creation functions are used for the constructor.
 -- in particular for the case of optional arguments.
-newCreatorName :: Name -> Name
+-- note: we cannot use `typeQualifiedName` as we need to use it in
+-- expressions for dependency analysis before we know its type.
+newCreatorName :: Name ->  Name
 newCreatorName name
   = makeHiddenName "create" name
 
@@ -676,68 +703,72 @@ isCreatorName :: Name -> Bool
 isCreatorName name
   = hiddenNameStartsWith name "create"
 
+hndName = newHiddenName "hnd"
+handleName = newHiddenName "handle"
+effectTagName = newHiddenName "tag"
+effectOpsName = newHiddenName "ops"
+opsSelectName = newHiddenName "select"
 
 -- | Create a handler type name from an effect type name.
 toHandlerName :: Name -> Name
-toHandlerName name
-  = makeHiddenName "hnd" name
+toHandlerName typeName
+  = typeQualifiedNameOf typeName $ hndName
 
 isHandlerName :: Name -> Bool
 isHandlerName name
-  = hiddenNameStartsWith name "hnd"
+  = stemIsEqual hndName name
 
 -- | Create an effect type name from an operations type name.
 fromHandlerName :: HasCallStack => Name -> Name
 fromHandlerName name
-  = unmakeHidden "hnd" name
-
+  = typeQualifiedGetTypeName name
 
 -- | Create a handle function name from an effect type name.
 toHandleName :: Name -> Name
-toHandleName name
-  = makeHiddenName "handle" name
+toHandleName typeName
+  = typeQualifiedNameOf typeName $ handleName -- makeHiddenName "handle" name
 
 isHandleName :: Name -> Bool
 isHandleName name
-  = hiddenNameStartsWith name "handle"
+  = stemIsEqual handleName name -- hiddenNameStartsWith name "handle"
 
 
 -- | Create an operations type name from an effect type name.
 toOperationsName :: Name -> Name
-toOperationsName name
-  = makeHiddenName "ops" name
+toOperationsName typeName
+  = typeQualifiedNameOf typeName effectOpsName --makeHiddenName "ops" name
 
 -- | Is this an operations name?
 isOperationsName :: Name -> Bool
 isOperationsName name
-  = hiddenNameStartsWith name "ops"
+  = stemIsEqual name effectOpsName -- hiddenNameStartsWith name "ops"
 
 -- | Create an effect type name from an operations type name.
 fromOperationsName :: Name -> Name
 fromOperationsName name
-  = unmakeHidden "ops" name
+  = typeQualifiedGetTypeName name -- unmakeHidden "ops" name
 
 
 -- | Create an operations type name from an effect type name.
 toOpSelectorName :: Name -> Name
-toOpSelectorName name
-  = makeHiddenName "select" name
+toOpSelectorName typeName
+  = typeQualifiedNameOf typeName opsSelectName -- makeHiddenName "select" name
 
 -- | Is this an operations name?
 isOpSelectorName :: Name -> Bool
 isOpSelectorName name
-  = hiddenNameStartsWith name "select"
+  = stemIsEqual name opsSelectName -- hiddenNameStartsWith name "select"
 
 -- | Create an effect type name from an operations type name.
 fromOpSelectorName :: Name -> Name
 fromOpSelectorName name
-  = unmakeHidden "select" name
+  = typeQualifiedGetTypeName name -- unmakeHidden "select" name
 
 
 -- | Create an effect tag name from an effect type name.
 toEffectTagName :: Name -> Name
-toEffectTagName name
-  = makeHiddenName "tag" name
+toEffectTagName typeName
+  = typeQualifiedNameOf typeName effectTagName -- makeHiddenName "tag" name
 
 -- | Create an operation type name from an operation name.
 toOpTypeName :: Name -> Name

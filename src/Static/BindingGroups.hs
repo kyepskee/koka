@@ -5,7 +5,7 @@
 -- terms of the Apache License, Version 2.0. A copy of the License can be
 -- found in the LICENSE file at the root of this distribution.
 -----------------------------------------------------------------------------
-module Static.BindingGroups( bindingGroups, hasFreeVar ) where
+module Static.BindingGroups( groupProgramBindings, groupTypeDefBindings, groupBindings, hasFreeVar ) where
 
 
 import qualified Common.NameMap as M
@@ -24,17 +24,17 @@ import Lib.Trace (trace)
 -- Program
 ---------------------------------------------------------------------------
 
-bindingGroups :: UserProgram -> UserProgram
-bindingGroups (Program source modName nameRange typeDefs defs imports externals fixDefs doc)
+groupProgramBindings :: UserProgram -> UserProgram
+groupProgramBindings (Program source modName nameRange typeDefs defs imports externals fixDefs doc)
   = Program source modName nameRange
-      (bindingsTypeDefs modName typeDefs)
-      (bindings ({-toShortModuleName-} modName) defs) imports externals fixDefs doc
+      (groupTypeDefBindings modName typeDefs)
+      (groupBindings ({-toShortModuleName-} modName) defs) imports externals fixDefs doc
 
 ---------------------------------------------------------------------------
 -- Binding groups in type definitions
 ---------------------------------------------------------------------------
-bindingsTypeDefs :: Name -> [UserTypeDefGroup] -> [UserTypeDefGroup]
-bindingsTypeDefs modName typeDefGroups
+groupTypeDefBindings :: Name -> [UserTypeDefGroup] -> [UserTypeDefGroup]
+groupTypeDefBindings modName typeDefGroups
   = let (ds,extends) = partition isDefinition (flatten typeDefGroups)
     in groupTypeDefs ds (M.fromList (map (dependencyTypeDef modName) ds)) ++ (map TypeDefNonRec extends)
   where
@@ -92,24 +92,26 @@ instance HasFreeTypes (KUserType k) where
 ---------------------------------------------------------------------------
 -- Binding groups in definitions
 ---------------------------------------------------------------------------
-bindings :: Name -> [UserDefGroup] -> [UserDefGroup]
-bindings modName defGroups
-  = group defs deps
+groupBindings :: Name -> [DefGroup t] -> [DefGroup t]
+groupBindings modName defGroups
+  = -- trace ("groupBindings: " ++ show (concatMap defGroupNames defGroups)) $
+    group defs deps
   where
     extraDeps    = extractExtraDeps defGroups
     (defs, deps) = unzipWith (concat, unions) (map (bindingsDefGroup extraDeps modName) defGroups)
-
+    defGroupNames (DefNonRec def) = [defName def]
+    defGroupNames (DefRec defs)   = map defName defs
 
 type ExtraDeps = M.NameMap [Name]  -- maps base names (`eq`) to internally qualified names (`int/eq`,`char/eq`)
 
-extractExtraDeps :: [UserDefGroup] -> ExtraDeps
+extractExtraDeps :: [DefGroup t] -> ExtraDeps
 extractExtraDeps dgs
   = M.unionsWith (++) (map eedDefGroup dgs)
 
 eedDefGroup (DefNonRec def) = eedDef def
 eedDefGroup (DefRec defs)   = M.unionsWith (++) (map eedDef defs)
 
-eedDef :: UserDef -> ExtraDeps
+eedDef :: Def t -> ExtraDeps
 eedDef def
   = let name = binderName (defBinder def)
     in if isLocallyQualified name
@@ -120,14 +122,14 @@ eedDef def
 unions ms
   = foldr (M.unionWith S.union) M.empty ms
 
-bindingsDefGroup :: ExtraDeps -> Name -> UserDefGroup -> ([UserDef], Deps)
+bindingsDefGroup :: ExtraDeps -> Name -> DefGroup t -> ([Def t], Deps)
 bindingsDefGroup extraDeps modName group
   = case group of
       DefNonRec def  -> let (newDef,deps) = dependencyDef extraDeps modName def in ([newDef],deps)
       DefRec defs    -> dependencies extraDeps modName defs
 
 
-dependencies :: ExtraDeps -> Name -> [UserDef] -> ([UserDef], Deps)
+dependencies :: ExtraDeps -> Name -> [Def t] -> ([Def t], Deps)
 dependencies extraDeps modName defs
   = (depDefs, deps)
   where
@@ -135,13 +137,13 @@ dependencies extraDeps modName defs
     freeVars = S.unions (M.elems deps)
     (depDefs, deps)  = unzipWith (id,unions) (map (dependencyDef extraDeps modName) defs)
 
-dependencyDef :: ExtraDeps -> Name -> UserDef -> (UserDef, Deps)
+dependencyDef :: ExtraDeps -> Name -> Def t -> (Def t, Deps)
 dependencyDef extraDeps modName def
   = (def{ defBinder = depBinding}, deps)
   where
     (depBinding,deps) = dependencyBinding extraDeps modName (defBinder def)
 
-dependencyBinding :: ExtraDeps -> Name -> UserValueBinder UserExpr -> (UserValueBinder UserExpr, Deps)
+dependencyBinding :: ExtraDeps -> Name -> ValueBinder () (Expr t) -> (ValueBinder () (Expr t), Deps)
 dependencyBinding extraDeps modName vb
   = -- trace ("dependency def: " ++ show (binderName vb) ++ ": " ++ show (S.toList freeVar)) $
     (vb{ binderExpr = depBody }, M.singleton (binderName vb) freeVar)
@@ -149,12 +151,12 @@ dependencyBinding extraDeps modName vb
     (depBody, freeVar) = dependencyExpr extraDeps modName (binderExpr vb)
 
 
-dependencyDefFv :: ExtraDeps -> Name -> UserDef -> (UserDef, FreeVar)
+dependencyDefFv :: ExtraDeps -> Name -> Def t -> (Def t, FreeVar)
 dependencyDefFv extraDeps modName def
   = let (depDef, deps) = dependencyDef extraDeps modName def
     in (depDef, S.unions (M.elems deps))
 
-dependencyDefGroupFv :: ExtraDeps -> Name -> UserDefGroup -> ([UserDefGroup],FreeVar,S.NameSet)
+dependencyDefGroupFv :: ExtraDeps -> Name -> DefGroup t -> ([DefGroup t],FreeVar,S.NameSet)
 dependencyDefGroupFv extraDeps modName defGroup
   = (group defs deps, freeVar, names)
   where
@@ -162,7 +164,7 @@ dependencyDefGroupFv extraDeps modName defGroup
     names   = S.fromList (M.keys deps)
     (defs,deps) = bindingsDefGroup extraDeps modName defGroup
 
-dependencyExpr :: ExtraDeps -> Name -> UserExpr -> (UserExpr, FreeVar)
+dependencyExpr :: ExtraDeps -> Name -> Expr t -> (Expr t, FreeVar)
 dependencyExpr extraDeps modName expr
   = case expr of
       Lam binders body rng -> let (depBody,fv1) = dependencyExpr extraDeps modName body
@@ -214,7 +216,7 @@ dependencyExprMaybe extraDeps modName mbExpr
       Just expr -> let (depExpr,fv) = dependencyExpr extraDeps modName expr
                    in (Just depExpr,fv)
 
-dependencyHandlerBranch :: ExtraDeps -> Name -> UserHandlerBranch -> (UserHandlerBranch, FreeVar)
+dependencyHandlerBranch :: ExtraDeps -> Name -> HandlerBranch t -> (HandlerBranch t, FreeVar)
 dependencyHandlerBranch extraDeps modName hb@(HandlerBranch{ hbranchName=name, hbranchPars=pars, hbranchExpr=expr })
   = (hb{ hbranchExpr = depExpr }, S.insert uname (S.difference fvExpr (S.fromList (map getName pars))))
   where
@@ -222,19 +224,19 @@ dependencyHandlerBranch extraDeps modName hb@(HandlerBranch{ hbranchName=name, h
     (depExpr, fvExpr)   = dependencyExpr extraDeps modName expr
 
 
-dependencyBranch :: ExtraDeps -> Name -> UserBranch -> (UserBranch, FreeVar)
+dependencyBranch :: ExtraDeps -> Name -> Branch t -> (Branch t, FreeVar)
 dependencyBranch extraDeps modName (Branch pattern guards)
   = let (depGuards, fvGuards) = unzipWith (id,S.unions) (map (dependencyGuard extraDeps modName) guards)
     in  (Branch pattern depGuards, S.difference fvGuards (freeVar pattern))
 
-dependencyGuard :: ExtraDeps -> Name -> UserGuard -> (UserGuard, FreeVar)
+dependencyGuard :: ExtraDeps -> Name -> Guard t -> (Guard t, FreeVar)
 dependencyGuard extraDeps modName (Guard test expr)
   = (Guard depTest depExpr, S.union fvTest fvExpr)
   where
     (depTest, fvTest) = dependencyExpr extraDeps modName test
     (depExpr, fvExpr) = dependencyExpr extraDeps modName expr
 
-dependencyLamBinders :: ExtraDeps -> Name -> FreeVar -> [ValueBinder (Maybe UserType) (Maybe UserExpr)] -> ([ValueBinder (Maybe UserType) (Maybe UserExpr)], FreeVar)
+dependencyLamBinders :: ExtraDeps -> Name -> FreeVar -> [ValueBinder (Maybe t) (Maybe (Expr t))] -> ([ValueBinder (Maybe t) (Maybe (Expr t))], FreeVar)
 dependencyLamBinders extraDeps modName fv []
   = ([],fv)
 dependencyLamBinders extraDeps modName fv (binder:binders)
@@ -245,7 +247,7 @@ dependencyLamBinders extraDeps modName fv (binder:binders)
          Just expr -> let (expr',fv2) = dependencyExpr extraDeps modName expr
                       in (binder{ binderExpr = Just expr' }:binders0, S.union fv1 fv2)
 
-dependencyLamBinder :: ExtraDeps -> Name -> ValueBinder (Maybe UserType) (Maybe UserExpr) -> (ValueBinder (Maybe UserType) (Maybe UserExpr), FreeVar)
+dependencyLamBinder :: ExtraDeps -> Name -> ValueBinder (Maybe t) (Maybe (Expr t)) -> (ValueBinder (Maybe t) (Maybe (Expr t)), FreeVar)
 dependencyLamBinder extraDeps modName binder
   = case binderExpr binder of
       Nothing -> (binder,S.empty)
@@ -333,7 +335,7 @@ type FreeVar = S.NameSet
 ---------------------------------------------------------------------------
 -- Topological sort
 ---------------------------------------------------------------------------
-group :: [UserDef] -> Deps -> [UserDefGroup]
+group :: [Def t] -> Deps -> [DefGroup t]
 group defs deps
   = let -- get definition id's
         defVars  = S.fromList (M.keys deps)
@@ -341,8 +343,11 @@ group defs deps
         -- constrain to the current group of id's
         defDeps  = M.map (\fvs -> S.intersection defVars fvs) deps
 
-        -- determine strongly connected components (`scc`)
-        defDepsList = [(id,S.toList fvs) | (id,fvs) <- M.toList defDeps]
+        -- determine strongly connected components (`scc`) in order of definitions
+        defDepsList = -- [(id,S.toList fvs) | (id,fvs) <- M.toList defDeps]
+                      concatMap (\def -> case M.lookup (defName def) defDeps of
+                                           Just fvs -> [(defName def,S.toList fvs)]
+                                           Nothing  -> []) defs
         defOrderScc = scc defDepsList
 
         -- create a map from definition id's to definitions.
@@ -361,7 +366,7 @@ group defs deps
         -- 2. We may not see all dependencies: implicit parameters are resolved at type checking
         --    and may introduce dependencies that we cannot determine yet. As a programmer, we
         --    can ensure the correct order by putting such implicit dependencies first in the source.
-        lineOf ids  = let getLine id = map (posLine . rangeStart . getRange) (M.find id defMap)
+        lineOf ids  = let getLine id = map (posLine . rangeStart . defRange) (M.find id defMap)
                       in case concatMap getLine ids of
                            []    -> 0
                            lines -> minimum lines
@@ -382,7 +387,7 @@ group defs deps
                                     else map DefNonRec (M.find id defMap)
                            _    -> [DefRec [def | id <- ids, def <- M.find id defMap]]
         finalGroup     = concatMap makeGroup defOrder
-    in -- trace ("trace: bindings: " ++ show defVars ++ "\n\ndependencies: " ++ show defDepsList ++
+    in -- trace ("groups: groupBindings: " ++ show defVars ++ "\n\ndependencies: " ++ show defDepsList ++
        --             "\n\ninitial order: " ++ show defOrderScc ++ "\n\nfinal order: " ++ show defOrder) $
        finalGroup
 
@@ -429,7 +434,7 @@ Doaitse developed at the University of Utrecht.
 --------------------------------------------------------------------}
 ATTR Program TypeDefs TypeDef Def Defs Expr Pattern Lit
      Exprs Patterns Branch Branches
-     UserType UserTypes UserKindScheme UserKind
+     t UserTypes UserKindScheme UserKind
      Externals External
      FixDefs FixDef
       [ || grouped : SELF ]
@@ -447,7 +452,7 @@ ATTR TypeDefGroup  [ || grouped : TypeDefGroups]
 ATTR TypeDefGroups [ || grouped USE {++} {[]}: TypeDefGroups]
 
 SEM TypeDefGroup
-  | TypeDefGroup lhs.grouped = groupTypeDefs @typeDefs.grouped @typeDefs.deps
+  | TypeDefGroup lhs.grouped = groupTypeDefBindings @typeDefs.grouped @typeDefs.deps
 
 
 {
@@ -469,8 +474,8 @@ group defs deps
                            _    -> DefRec [M.find id defMap | id <- ids]
     in map makeGroup defOrder
 
-groupTypeDefs :: TypeDefs -> Deps -> TypeDefGroups
-groupTypeDefs typeDefs deps
+groupTypeDefBindings :: TypeDefs -> Deps -> TypeDefGroups
+groupTypeDefBindings typeDefs deps
   = let -- get type names
         typeNames = S.fromList (M.keys deps)
         -- constrain to current group of id's
@@ -527,8 +532,8 @@ SEM Pattern
 {--------------------------------------------------------------------------
   Free types
 --------------------------------------------------------------------------}
-ATTR UserTypes UserType [ || freeTypes USE {`S.union`} {S.empty} : {S.NameSet} ]
+ATTR UserTypes t [ || freeTypes USE {`S.union`} {S.empty} : {S.NameSet} ]
 
-SEM UserType
+SEM t
   | TpCon       lhs.freeTypes = S.single @name
 -}
