@@ -2,7 +2,7 @@ import queue
 import std/core/undiv
 
 // internal: marker for lazy values that get matched to evaluate to whnf
-fip extern lazy-whnf-target(target : a) : ()
+inline fip extern lazy-whnf-target(target : a) : ()
   ""
 
 // internal: explicitly force update-in-place for lazy values
@@ -41,6 +41,7 @@ type stream<a>
                       Cons(x,xx) -> SCons(x,SNil) // sreverse(xx))
                       Nil        -> SNil
       SCons(x,xx) -> SCons(x,SAppRev(xx,post))
+      _           -> SNil // cannot happen, fix
 
 fip fun sreverse-acc( xs : list<a>, acc : stream<a> ) : stream<a>
   match xs
