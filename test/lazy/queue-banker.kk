@@ -16,14 +16,16 @@ inline fip extern kk-datatype-is-whnf(^x:a, lazy-tag:int32) : bool
 inline fip extern kk-datatype-ptr-is-whnf(^x:a, lazy-tag:int32) : bool
   c "kk_datatype_ptr_is_whnf"
 
+inline fip extern kk-datatype-ptr-is-unique(^x:a) : bool
+  c "kk_datatype_ptr_is_unique"
 
 // internal: evaluate atomically (or return `false` if already evaluated)
 inline fip extern lazy-atomic-enter(^target : a, lazy-tag: int32 ) : bool
   c "kk_lazy_atomic_enter"
 
 // internal: release an atomically evaluated value
-inline fip extern lazy-atomic-unblock(target : a) : ()
-  c "kk_lazy_atomic_unblock"
+inline fip extern lazy-atomic-leave(target : a) : ()
+  c "kk_lazy_atomic_leave"
 
 // internal: is a lazy datatype thread shared?
 inline fip extern kk-datatype-ptr-is-thread-shared(^x : a) : bool
@@ -33,15 +35,21 @@ inline fip extern kk-datatype-ptr-is-thread-shared(^x : a) : bool
 type stream<a>
   SNil
   SCons( head : a, tail : stream<a> )
+  // will be generated
   SIndirect( s : stream<a> )
+  // user writes:
   lazy SAppRev( pre : stream<a>, post : list<a> ) ->
     match pre
-      // SNil        -> stream-eval(lazy-update(s,sreverse(post)))  // (A)
+      // this gives a warning
+      SNil        -> sreverse(post)  // (A)
+
+      // but not this
       SNil        -> match post
-                      Cons(x,xx) -> SCons(x,SNil) // sreverse(xx))
+                      Cons(x,xx) -> SCons(x,sreverse(xx)
                       Nil        -> SNil
       SCons(x,xx) -> SCons(x,SAppRev(xx,post))
-      _           -> SNil // cannot happen, fix
+      _           -> SNil // cannot happen, fix match analysis
+
 
 fip fun sreverse-acc( xs : list<a>, acc : stream<a> ) : stream<a>
   match xs
@@ -63,7 +71,7 @@ noinline fbip fun stream-eval( s : stream<a> ) : _ stream<a>
   match s
     SAppRev( pre, post )
       -> match stream-forcex(pre)
-           // SNil        -> stream-eval(lazy-update(s,sreverse(post)))  // (A)
+           SNil        -> lazy-update(s,stream-eval(sreverse(post)))  // (A)
            SNil        -> match post
                             Cons(x,xx) -> lazy-update(s,SCons(x,sreverse(xx)))
                             Nil        -> lazy-update(s,SNil)
@@ -71,24 +79,20 @@ noinline fbip fun stream-eval( s : stream<a> ) : _ stream<a>
            _           -> lazy-update(s,SNil) // this cannot happen; todo: fix partial check
     // generated
     SIndirect(ind)
-      -> stream-eval(pretend-decreasing(ind))
+      -> ind // or stream-eval(ind) ?
     _ -> s
 
 noinline fbip fun stream-whnf( s : stream<a> ) : div stream<a>
-  // force(s,stream/lazy-tag,stream-eval)
-  if kk-datatype-ptr-is-thread-shared(s) && lazy-atomic-enter(s,stream/lazy-tag) then
-    val v = stream-eval(s)
-    lazy-atomic-unblock(s)
-    v
-  else
+  if kk-datatype-ptr-is-unique(s) || !lazy-atomic-enter(s,stream/lazy-tag) then
     stream-eval(s)
+  else
+    val v = stream-eval(s)
+    lazy-atomic-leave(s)
+    v
 
 fbip fun stream-forcex( s : stream<a> ) : div stream<a>
   // stream-eval(s)
   if kk-datatype-is-whnf(s,stream/lazy-tag) then s else stream-whnf(s)
-
-
-
 
 inline fbip fun stream-force( s : stream<a> ) : div stream<a>
   // stream-eval(s)
@@ -100,6 +104,7 @@ pub fbip fun stream/list( s : stream<a> ) : div list<a>
     SCons(x,xx) -> Cons(x,xx.list)
     SNil -> Nil
     _    -> Nil // cannot happen
+
 
 /*
 struct bqueue<a>

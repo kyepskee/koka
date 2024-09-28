@@ -1077,6 +1077,11 @@ static inline kk_decl_pure bool kk_datatype_has_singleton_tag(kk_datatype_t d, k
   return (d.dbox == kk_datatype_from_tag(t).dbox);
 }
 
+static inline bool kk_datatype_ptr_is_thread_shared( kk_datatype_ptr_t d, kk_context_t* ctx ) {
+  kk_assert(kk_datatype_is_ptr(d));
+  return kk_block_is_thread_shared(kk_datatype_as_ptr(d,ctx));
+}
+
 static inline bool kk_decl_pure kk_datatype_ptr_is_unique(kk_datatype_t d, kk_context_t* ctx) {
   kk_assert_internal(kk_datatype_is_ptr(d));
   //return (kk_datatype_is_ptr(d) && kk_block_is_unique(kk_datatype_as_ptr(d)));

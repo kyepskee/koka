@@ -47,8 +47,7 @@ static void kk_lazy_atomic_wait(kk_block_t* b, int32_t indirect_tag, kk_context_
   kk_assert(header.tag <= indirect_tag);
 }
 
-kk_decl_export bool kk_lazy_atomic_enter(kk_datatype_t lazy /* borrow */, int32_t indirect_tag, kk_context_t* ctx) {
-  kk_block_t* b = kk_datatype_as_ptr(lazy,ctx);
+kk_decl_export bool kk_lazy_atomic_thread_enter(kk_block_t* b /* borrow */, int32_t indirect_tag, kk_context_t* ctx) {
   kk_assert(kk_block_is_thread_shared(b));
   kk_header_t blocked_header;
   kk_header_t header;
@@ -59,6 +58,7 @@ kk_decl_export bool kk_lazy_atomic_enter(kk_datatype_t lazy /* borrow */, int32_
       return false;
     }
     else if (header._field_idx == KK_FIELD_IDX_LAZY_BLOCKED) {
+      // todo: if it is the same thread, change this in to a Lazy_blocked constructor and return?
       kk_lazy_atomic_wait(b,indirect_tag,ctx);
       return false;
     }
@@ -69,8 +69,7 @@ kk_decl_export bool kk_lazy_atomic_enter(kk_datatype_t lazy /* borrow */, int32_
   return true;
 }
 
-kk_decl_export void kk_lazy_atomic_unblock(kk_datatype_t lazy /* own */, kk_context_t* ctx) {
-  kk_block_t* b = kk_datatype_as_ptr(lazy,ctx);
+kk_decl_export void kk_lazy_atomic_leave(kk_block_t* b /* own */, kk_context_t* ctx) {
   kk_assert(kk_block_is_thread_shared(b));
   kk_header_t unblocked_header;
   kk_header_t header;
