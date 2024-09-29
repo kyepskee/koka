@@ -30,7 +30,7 @@ import Core.Simplify( simplifyDefs )
 import Core.Uniquefy( uniquefy )
 import Core.FunLift( liftFunctions )
 import Core.Inline( inlineDefs  )
-import Core.Inlines( Inlines, inlinesFilter, inlinesExtends, extractInlineDefs)
+import Core.Inlines( Inlines, inlinesFilter, inlinesExtends, extractInlineDefGroups)
 import Core.Monadic( monTransform )
 import Core.MonadicLift( monadicLift )
 import Core.Specialize( specialize, extractSpecializeDefs )
@@ -140,7 +140,7 @@ coreOptimize flags newtypes gamma inlines coreProgram
         coreDefsFinal <- Core.getCoreDefs
         uniqueFinal   <- unique
 
-        let localInlineDefs  = extractInlineDefs (optInlineMax flags) coreDefsInlined
+        let localInlineDefs  = extractInlineDefGroups (optInlineMax flags) coreDefsInlined
             -- give priority to specializeDefs, since inlining can prevent specialize opportunities
             allInlineDefs    = specializeDefs ++ localInlineDefs
 

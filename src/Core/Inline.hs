@@ -163,7 +163,8 @@ inlAppExpr expr m n onlyZeroCost
                   -> do traceDoc $ \penv -> text "inline candidate:" <+> ppName penv (getName tname) <+>
                                               text (show (m',n')) <+> text "vs" <+> text (show (m,n)) <+>
                                                 text ", onlyZeroCost:" <+> pretty onlyZeroCost <+>
-                                                  text ", inlineCost:" <+>  pretty (inlineCost info)
+                                                  text ", inlineCost:" <+>  pretty (inlineCost info) <+>
+                                                    (text (", def: " ++ show info))
                         return (expr)
                 Nothing -> do traceDoc $ \penv -> text "not inline candidate:" <+> text (showTName tname)
                               return (expr)
@@ -253,7 +254,7 @@ withCurrentDef def action
 
 inlExtend :: Bool -> [Def] -> Inl a -> Inl a
 inlExtend isRec defs
-  = withEnv (\env -> let inls = catMaybes (map (extractInlineDef (inlineMax env) isRec) defs)
+  = withEnv (\env -> let inls = extractInlineDefs (inlineMax env) isRec defs
                      in env{ inlines = inlinesExtends inls (inlines env)} )
 
 inlLookup :: Name -> Inl (Maybe (InlineDef,Int,Int))

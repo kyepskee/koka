@@ -17,8 +17,8 @@ module Core.Inlines ( -- Inline map
                     , inlinesFilter
                     , ppInlines
 
+                    , extractInlineDefGroups
                     , extractInlineDefs
-                    , extractInlineDef
                     ) where
 
 import Lib.Trace
@@ -32,6 +32,7 @@ import Common.Name
 import Common.NamePrim( nameBind, nameBind2 )
 import Common.ColorScheme
 import Core.Core
+import Core.CoreVar
 import Type.Pretty
 -- import qualified Core.CoreVar as CoreVar
 
@@ -80,23 +81,41 @@ inlinesFilter pred (Inlines m)
 {--------------------------------------------------------------------------
   Get suitable inline definitions from Core
 --------------------------------------------------------------------------}
-extractInlineDefs :: Int -> DefGroups -> [InlineDef]
-extractInlineDefs costMax dgs
+extractInlineDefGroups :: Int -> DefGroups -> [InlineDef]
+extractInlineDefGroups costMax dgs
   = concatMap (extractDefGroup costMax) dgs
 
+extractDefGroup :: Int -> DefGroup -> [InlineDef]
+extractDefGroup costMax (DefRec defs@[_])  -- self-recursive
+  = catMaybes (map (extractInlineDefRec costMax) defs)
 extractDefGroup costMax (DefRec defs)
-  = [] -- catMaybes (map (extractInlineDef costMax True) defs)
+  = catMaybes (map (extractInlineDefRec costMax) defs)
 extractDefGroup costMax (DefNonRec def)
   = maybeToList (extractInlineDef costMax False def)
+
+extractInlineDefs :: Int -> Bool -> [Def] -> [InlineDef]
+extractInlineDefs costMax True [def]  -- self-recursive
+  = []
+extractInlineDefs costMax True defs  -- self-recursive
+  = catMaybes (map (extractInlineDefRec costMax) defs)
+extractInlineDefs costMax False defs
+  = catMaybes (map (extractInlineDef costMax False) defs)
+
+extractInlineDefRec :: Int -> Def -> Maybe InlineDef
+extractInlineDefRec costMax def
+  = -- trace ("def: " ++ show (defName def) ++ ": try inline recursive group") $
+    if tnamesMember (defTName def) (fv (defExpr def))
+      then Nothing
+      else extractInlineDef costMax False def
 
 extractInlineDef :: Int -> Bool -> Def -> Maybe InlineDef
 extractInlineDef costMax isRec def
   = let inlinable = (isInlineable costMax def)
-    in -- trace ("def: " ++ show (defName def) ++ ", " ++ show (costDef def) ++ " : inline=" ++ show inlinable) $
+    in -- trace ("def: " ++ show (defName def) ++ ", " ++ show (costDef def) ++ (if isRec then ", rec" else "") ++ " : inline=" ++ show inlinable) $
         if not inlinable then Nothing
          else let cost = if (defName def == nameBind2 || defName def == nameBind)  -- TODO: use generic mechanism? force-inline keyword?
                           then 0 else costDef def
-              in Just (InlineDef (defName def) (defExpr def) isRec (defInline def) cost (defSort def) [])
+              in Just $! (InlineDef (defName def) (defExpr def) isRec (defInline def) cost (defSort def) [])
 
 instance Show Inlines where
  show = show . pretty

@@ -338,7 +338,12 @@ synLazyEval lazyExprs info
             defName  = lazyName info "eval"
             argName  = newHiddenName "lazy"
             arg      = Var argName False rng
-            lazyConstrs  = filter conInfoIsLazy (dataInfoConstrs info)
+
+            rotate (x:xs) = xs ++ [x]
+            rotate []     = []
+            lazyConstrs  = rotate (filter conInfoIsLazy (dataInfoConstrs info))  -- indirect match comes last
+
+
             -- dataTp    = typeApp (TCon (TypeCon (dataInfoName info) (dataInfoKind info))) (map TVar (dataInfoParams info))
             -- fullTp    = tForall (dataInfoParams info) [] (typeFun [(nameNil,dataTp)] typePure dataTp )
 
@@ -516,7 +521,7 @@ synLazyForce info
                              ,Branch (PatCon nameFalse [] rng rng) [Guard guardTrue whnf]] False rng
         tst       = App (Var (newName (prefix "is-whnf")) False rng) [(Nothing,arg),(Nothing,Var (lazyName info "lazy-tag") False rng)] rng
         whnf      = App (Var (lazyName info "whnf") False rng) [(Nothing,arg)] rng
-    in DefNonRec (Def (ValueBinder defName () expr rng rng) rng (dataInfoVis info) (DefFun [] (lazyFip info)) InlineNever "")
+    in DefNonRec (Def (ValueBinder defName () expr rng rng) rng (dataInfoVis info) (DefFun [] (lazyFip info)) InlineAlways "")
 
 lazyFip :: HasCallStack => DataInfo -> Fip
 lazyFip info

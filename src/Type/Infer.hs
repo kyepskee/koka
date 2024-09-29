@@ -928,12 +928,14 @@ inferExpr propagated expect (Case expr branches isLazyMatch rng)
        ccore1  <- if not isLazyMatch && (dataInfoIsLazy dataInfo)
                     then do -- traceDefDoc $ \penv -> text "match force:" <+> prettyDataInfo penv False False  dataInfo
                             let forceName = typeQualifiedName (dataInfoName dataInfo) "force"
-                            (force,_,forceInfo) <- resolveFunName forceName (CtxFunArgs False 1 [] Nothing) rng (getRange expr)
+                            (force,forceTp,forceInfo) <- resolveFunName forceName (CtxFunArgs False 1 [] Nothing) rng (getRange expr)
                             let cforce   = coreExprFromNameInfo force forceInfo
-                                forceApp = case ccore0 of
-                                             Core.App (Core.Var fname _) [_] | force == Core.getName fname -> ccore0 -- don't duplicate as force(force(expr))
-                                             _ -> Core.App cforce [ccore0]
-                            return forceApp
+                            case ccore0 of
+                              Core.App (Core.Var fname _) [_] | force == Core.getName fname -> return ccore0 -- don't duplicate as force(force(expr))
+                              _ -> do (ftp,_,coref) <- instantiate rng forceTp
+                                      case splitFunType ftp of
+                                        Just (_,_,rtp) -> inferUnify (Infer rng) rng ctp rtp
+                                      return $ Core.App (coref cforce) [ccore0]
                   else return ccore0
        -- return core
        core    <- subst (Core.Case [ccore1] cbranches)
