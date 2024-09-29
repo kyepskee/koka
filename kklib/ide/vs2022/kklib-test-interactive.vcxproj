@@ -164,6 +164,7 @@
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="..\..\..\.koka\debug\queue.c" />
     <ClCompile Include="..\..\..\.koka\debug\std_core.c" />
     <ClCompile Include="..\..\..\.koka\debug\std_core_bool.c" />
     <ClCompile Include="..\..\..\.koka\debug\std_core_char.c" />
@@ -185,8 +186,15 @@
     <ClCompile Include="..\..\..\.koka\debug\std_core_undiv.c" />
     <ClCompile Include="..\..\..\.koka\debug\std_core_unsafe.c" />
     <ClCompile Include="..\..\..\.koka\debug\std_core_vector.c" />
-    <ClCompile Include="..\..\..\.koka\debug\test_cgen_box4.c" />
-    <ClCompile Include="..\..\..\.koka\debug\test_cgen_box4__main.c" />
+    <ClCompile Include="..\..\..\.koka\debug\std_num_float64.c" />
+    <ClCompile Include="..\..\..\.koka\debug\std_num_int32.c" />
+    <ClCompile Include="..\..\..\.koka\debug\std_num_int64.c" />
+    <ClCompile Include="..\..\..\.koka\debug\std_num_random.c" />
+    <ClCompile Include="..\..\..\.koka\debug\std_os_env.c" />
+    <ClCompile Include="..\..\..\.koka\debug\std_os_path.c" />
+    <ClCompile Include="..\..\..\.koka\debug\std_text_parse.c" />
+    <ClCompile Include="..\..\..\.koka\debug\test_lazy_queue_dash_banker.c" />
+    <ClCompile Include="..\..\..\.koka\debug\test_lazy_queue_dash_banker__main.c" />
   </ItemGroup>
   <ItemGroup>
     <Natvis Include="kklib.natvis" />

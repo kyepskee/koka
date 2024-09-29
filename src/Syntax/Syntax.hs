@@ -223,16 +223,16 @@ guardTrue
 
 -- | Expressions
 data Expr t
-  = Lam    [ValueBinder (Maybe t) (Maybe (Expr t))] (Expr t) Range
-  | Let    (DefGroup t) (Expr t)    Range
-  | Bind   (Def t) (Expr t)         Range
-  | App    (Expr t) [(Maybe (Name,Range),Expr t)] Range
-  | Var    Name Bool Range -- True if the var is an op
-  | Lit    Lit
-  | Ann    (Expr t) t Range
-  | Case   (Expr t) [Branch t]   Range
-  | Parens (Expr t)              Name String Range  --  name and string are used for the range map
-  | Inject t (Expr t) Bool {-behind?-} Range
+  = Lam    ![ValueBinder (Maybe t) (Maybe (Expr t))] !(Expr t) !Range
+  | Let    !(DefGroup t) !(Expr t)    !Range
+  | Bind   !(Def t) !(Expr t)         !Range
+  | App    !(Expr t) ![(Maybe (Name,Range),Expr t)] !Range
+  | Var    !Name !Bool !Range -- True if the var is an op
+  | Lit    !Lit
+  | Ann    !(Expr t) !t !Range
+  | Case   !(Expr t) ![Branch t] !Bool !Range
+  | Parens !(Expr t)             !Name !String !Range  --  name and string are used for the range map
+  | Inject !t !(Expr t) !Bool {-behind?-} !Range
   | Handler{ hndlrSort         :: !HandlerSort,
              hndlrScope        :: !HandlerScope,
              hndlrOverride     :: !HandlerOverride,
@@ -397,7 +397,7 @@ instance Ranged (Expr t) where
         Var    name isop range -> range
         Lit    lit             -> getRange lit
         Ann    expr tp range   -> range
-        Case   exprs branches range -> range
+        Case   exprs branches _ range -> range
         Parens expr name pre range  -> range
         Handler shallow scoped override _ eff pars reinit ret final ops hrng range -> range
         Inject tp expr behind range -> range

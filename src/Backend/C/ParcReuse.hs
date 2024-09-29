@@ -760,13 +760,13 @@ deconstructLazyCon rname = updateSt (\s -> case lazyCon s of
   DeconstructedLazyCon tname _ -> s { lazyCon = DeconstructedLazyCon tname rname }
   _ -> error $ "destructLazyCon: not a known lazy con")
 
-getDeconstructedLazyCon :: Reuse (TName, TName)
+getDeconstructedLazyCon :: HasCallStack => Reuse (TName, TName)
 getDeconstructedLazyCon = do
   s <- lazyCon <$> getSt
   case s of
     DeconstructedLazyCon tname rname -> return (tname, rname)
-    KnownLazyCon tname -> error $ "getDeconstructedLazyCon: " ++ show tname ++ " was not deconstructed"
-    NoLazyCon -> error $ "getDeconstructedLazyCon: no known lazy con"
+    KnownLazyCon tname -> ruError $ "getDeconstructedLazyCon: " ++ show tname ++ " was not deconstructed"
+    NoLazyCon -> ruError $ "getDeconstructedLazyCon: no known lazy con"
 
 --
 
@@ -834,6 +834,11 @@ ruTrace msg
  = do defs <- getCurrentDef
       trace ("Core.Reuse: " ++ show (map defName defs) ++ ": " ++ msg) $
         return ()
+
+ruError :: String -> Reuse a
+ruError msg
+  = do defs <- getCurrentDef
+       error ("Core.Reuse: " ++ show (map defName defs) ++ ": " ++ msg)
 
 ----------------
 

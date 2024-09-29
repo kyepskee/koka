@@ -96,9 +96,9 @@ resolveExpr expr
       Lit    lit             -> return expr
       Ann    expr tp range   -> do expr' <- resolveExpr expr
                                    return (Ann expr' tp range)
-      Case   expr brs range  -> do expr' <- resolveExpr expr
-                                   brs'   <- mapM resolveBranch brs
-                                   return (Case expr' brs' range)
+      Case   expr brs lazy range  -> do expr' <- resolveExpr expr
+                                        brs'   <- mapM resolveBranch brs
+                                        return (Case expr' brs' lazy range)
       Parens expr name pre range -> do expr' <- resolveExpr expr
                                        return (Parens expr' name pre range)
       Handler shallow scoped override allowMask eff pars reinit ret final ops hrng rng

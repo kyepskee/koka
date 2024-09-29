@@ -118,7 +118,7 @@ instance HasFoldingRanges UserExpr where
     Bind d e r                            -> foldings d ++ foldings e ++ makeFolding r (getName d)
     App e nes _                           -> foldings e ++ foldings (map snd nes)
     Ann e _ r                             -> foldings e ++ makeFoldingNoName r
-    Case e bs r                           -> foldings e ++ foldings bs ++ makeFoldingNoName r
+    Case e bs _ r                         -> foldings e ++ foldings bs ++ makeFoldingNoName r
     Parens e _ _ _                        -> foldings e
     Handler _ _ _ _ _ bs e1 e2 e3 hbs _ r -> foldings bs ++ foldings e1
                                                         ++ foldings e2

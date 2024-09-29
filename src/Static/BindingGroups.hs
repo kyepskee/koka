@@ -190,9 +190,9 @@ dependencyExpr extraDeps modName expr
                               in (App fun' (zip argNames args') rng, S.union funvars argvars)
       Ann expr t rng       -> let (depExpr,fv) = dependencyExpr extraDeps modName expr
                               in (Ann depExpr t rng, fv)
-      Case expr branches rng -> let (depExpr,fv1) = dependencyExpr extraDeps modName expr
-                                    (depBranches,fv2) = dependencyBranches dependencyBranch extraDeps modName branches
-                                in (Case depExpr depBranches rng, S.union fv1 fv2)
+      Case expr branches lazy rng -> let (depExpr,fv1) = dependencyExpr extraDeps modName expr
+                                         (depBranches,fv2) = dependencyBranches dependencyBranch extraDeps modName branches
+                                     in (Case depExpr depBranches lazy rng, S.union fv1 fv2)
       Parens expr name pre rng -> let (depExpr, fv) = dependencyExpr extraDeps modName expr
                                   in (Parens depExpr name pre rng, fv)
 --      Con    name isop range -> (expr, S.empty)
@@ -288,7 +288,7 @@ instance HasFreeVar (Expr t) where
                                 else S.singleton name
       App fun nargs rng    -> freeVar (fun:map snd nargs)
       Ann expr t rng       -> freeVar expr
-      Case expr bs rng     -> S.union (freeVar expr) (freeVar bs)
+      Case expr bs _ rng     -> S.union (freeVar expr) (freeVar bs)
       Parens expr name pre rng -> freeVar expr
       Lit    lit           -> S.empty
       Inject tp body b rng -> freeVar body

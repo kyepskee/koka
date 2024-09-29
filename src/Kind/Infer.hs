@@ -181,7 +181,7 @@ synTypeDef modName lazyExprs (Core.Data dataInfo)
           then [synCopyCon modName dataInfo (head (dataInfoConstrs dataInfo))]
           else [])
         ++
-        (if (length (dataInfoConstrs dataInfo) > 1 || (dataInfoIsOpen dataInfo))
+        (if (length (dataInfoConstrs dataInfo) > 1 || (dataInfoIsOpen dataInfo)) && not (dataInfoIsLazy dataInfo)
           then concatMap (synTester dataInfo) (dataInfoConstrs dataInfo)
           else [])
         ++
@@ -255,7 +255,7 @@ synAccessors modName info
                             typeFun [(arg,dataTp)] (if isPartial then typePartial else typeTotal) rho
 
                 expr       = Ann (Lam [ValueBinder arg Nothing Nothing rng rng] caseExpr rng) fullTp xrng
-                caseExpr   = Case (Var arg False rng) (map snd branches ++ defaultBranch) rng
+                caseExpr   = Case (Var arg False rng) (map snd branches ++ defaultBranch) False rng
                 -- visibility = if (all (==Public) (map fst branches)) then Public else Private
 
                 isPartial = (length branches < length (dataInfoConstrs info)) || dataInfoIsOpen info
@@ -283,7 +283,7 @@ synAccessors modName info
     in map synAccessor fields
 
 synTester :: DataInfo -> ConInfo -> [DefGroup Type]
-synTester info con | isHiddenName (conInfoName con)
+synTester info con | isHiddenName (conInfoName con) || conInfoIsLazy con
   = []
 synTester info con
   = let name = (prepend "is-" (toVarName (unqualify (conInfoName con))))
@@ -291,7 +291,7 @@ synTester info con
         rc  = rangeHide (conInfoRange con)
 
         expr      = Lam [ValueBinder arg Nothing Nothing rc rc] caseExpr rc
-        caseExpr  = Case (Var arg False rc) [branch1,branch2] rc
+        caseExpr  = Case (Var arg False rc) [branch1,branch2] (conInfoIsLazy con) rc
         branch1   = Branch (PatCon (conInfoName con) patterns rc rc) [Guard guardTrue (Var nameTrue False rc)]
         branch2   = Branch (PatWild rc) [Guard guardTrue (Var nameFalse False rc)]
         patterns  = [(Nothing,PatWild rc) | _ <- conInfoParams con]
@@ -360,7 +360,7 @@ synLazyEval lazyExprs info
 
        let  expr      = Lam [ValueBinder argName Nothing Nothing rng rng] (Bind mark body rng) xrng
             mark      = Def (ValueBinder nameNil () (App (Var (newName "lazy-whnf-target") False rng) [(Nothing,arg)] rng) rng rng) rng Private DefVal InlineNever ""
-            body      = Case arg (branches ++ [Branch (PatWild rng) [Guard guardTrue arg]]) rng
+            body      = Case arg (branches ++ [Branch (PatWild rng) [Guard guardTrue arg]]) True rng
             def = Def (ValueBinder defName () expr rng rng) rng (dataInfoVis info) (DefFun [] (lazyFip info)) InlineNever ""
        return $ DefNonRec def
 
@@ -401,8 +401,23 @@ lazyAddUpdate info conInfo evalName arg topExpr
           Let    defs expr range -> (\expr' -> Let defs expr' range) <$> add expr
           Bind   def expr range  -> (\expr' -> Bind def expr' range) <$> add expr
           Ann    expr tp range   -> (\expr' -> Ann expr' tp range) <$> add expr
-          Case   expr brs range  -> do brs' <- mapM addBranch brs
-                                       return (Case expr brs' range)
+          Case   expr brs lazy range
+            -> do brs' <- mapM addBranch brs
+                  -- specialize force insertion here so the dependency is known
+                  -- for all other matches, this is done during type inference
+                  let isWhnfConPat p
+                        = case p of
+                            PatParens pat _      -> isWhnfConPat pat
+                            PatAnn pat _ _       -> isWhnfConPat pat
+                            PatVar v             -> isWhnfConPat (binderExpr v)
+                            PatCon cname _ _ _   -> isWhnfCon cname
+                            _                    -> False
+                      isWhnfConBranch (Branch pat guards) = isWhnfConPat pat
+                      forceName = typeQualifiedName (dataInfoName info) "force"
+                      exprForce = if any isWhnfConBranch brs
+                                    then App (Var forceName False (getRange expr)) [(Nothing,expr)] (getRange expr)
+                                    else expr
+                  return (Case exprForce brs' lazy range)
           Parens expr name pre range -> do expr' <- add expr
                                            return $ Parens expr' name pre range
           App (Var cname _ _) nargs range
@@ -467,7 +482,7 @@ synLazyWhnf info
         arg       = Var argName False rng
         expr      = Lam [ValueBinder argName Nothing Nothing rng rng] body xrng
         body      = Case tst [Branch (PatCon nameTrue [] rng rng) [Guard guardTrue eval]
-                             ,Branch (PatCon nameFalse [] rng rng) [Guard guardTrue atomic]] rng
+                             ,Branch (PatCon nameFalse [] rng rng) [Guard guardTrue atomic]] False rng
         tst       = App (Var nameOr False rng)
                      [(Nothing,App (Var (newName "kk-datatype-ptr-is-unique") False rng) [(Nothing,arg)] rng),
                       (Nothing,App (Var (newQualified "std/core/types" "not") False rng)
@@ -492,13 +507,13 @@ synLazyForce info
         dataTp   = typeApp (TCon (TypeCon (dataInfoName info) (dataInfoKind info))) (map TVar (dataInfoParams info))
         -- fullTp   = tForall (dataInfoParams info) [] (typeFun [(nameNil,dataTp)] typePure dataTp )
         prefix s = (if (all (\conInfo -> not (null (conInfoParams conInfo))) (dataInfoConstrs info))
-                     then "kk-datatype-" else "kk-datatype-ptr-") ++ s
+                     then "kk-datatype-ptr-" else "kk-datatype-") ++ s
 
         argName   = newHiddenName "lazy"
         arg       = Var argName False rng
         expr      = Lam [ValueBinder argName Nothing Nothing rng rng] body xrng
         body      = Case tst [Branch (PatCon nameTrue [] rng rng) [Guard guardTrue arg]
-                             ,Branch (PatCon nameFalse [] rng rng) [Guard guardTrue whnf]] rng
+                             ,Branch (PatCon nameFalse [] rng rng) [Guard guardTrue whnf]] False rng
         tst       = App (Var (newName (prefix "is-whnf")) False rng) [(Nothing,arg),(Nothing,Var (lazyName info "lazy-tag") False rng)] rng
         whnf      = App (Var (lazyName info "whnf") False rng) [(Nothing,arg)] rng
     in DefNonRec (Def (ValueBinder defName () expr rng rng) rng (dataInfoVis info) (DefFun [] (lazyFip info)) InlineNever "")
@@ -830,9 +845,9 @@ infExpr expr
                                    tp'   <- infResolveType tp (Check "Expressions must be values" range)
                                    -- trace ("resolve ann: " ++ show (pretty tp')) $
                                    return (Ann expr' tp' range)
-      Case   expr brs range  -> do expr' <- infExpr expr
-                                   brs'   <- mapM infBranch brs
-                                   return (Case expr' brs' range)
+      Case   expr brs lazy range  -> do expr' <- infExpr expr
+                                        brs'   <- mapM infBranch brs
+                                        return (Case expr' brs' lazy range)
       Parens expr name pre range -> do expr' <- infExpr expr
                                        return (Parens expr' name pre range)
       Handler hsort scoped override allowMask meff pars reinit ret final ops hrng rng

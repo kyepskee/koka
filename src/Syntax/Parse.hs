@@ -1235,7 +1235,7 @@ operationDecl opCount vis forallsScoped forallsNonScoped docEffect docEffectDecl
                           hndArg    = newName "hnd"
                           hndParam  = ValueBinder hndArg Nothing Nothing krng grng
 
-                          innerBody = Case (Var hndArg False grng) [branch] grng
+                          innerBody = Case (Var hndArg False grng) [branch] False grng
                           branch    = Branch (PatCon (toHandlerConName hndName) patterns grng grng)
                                              [Guard guardTrue (Var clauseId False grng)]
                           i          = opIndex
@@ -1459,7 +1459,7 @@ parNormal allowDefaults
             -> do -- transform (fun (pattern) { body }) --> fun(.pat_X_Y) { match(.pat_X_Y) { pattern -> body }}
                   let name = uniqueRngHiddenName rng "pat"
                       transform (Lam binders body lambdaRng) = Lam binders (Case (Var name False rng)
-                                                                              [Branch pat [Guard guardTrue body]] rng) lambdaRng
+                                                                              [Branch pat [Guard guardTrue body]] False rng) lambdaRng
                       transform (Ann body tp rng) = Ann (transform body) tp rng
                       transform (Parens body name pre rng) = Parens (transform body) name pre rng
                       transform _ = failure "Syntax.Parse.parameter: unexpected function expression in parameter match transform"
@@ -1596,7 +1596,7 @@ localValueDecl
            -> return $ bindVar binder (binderType binder) (binderRange binder)
          PatAnn (PatVar (binder@ValueBinder{ binderExpr = PatWild _})) tp rng
            -> return $ bindVar binder (Just tp) rng
-         _ -> return $ \body -> Case e [Branch pat [Guard guardTrue body]] (combineRanged krng body)
+         _ -> return $ \body -> Case e [Branch pat [Guard guardTrue body]]  False (combineRanged krng body)
 
   where
     unParens (PatParens p _) = unParens(p)
@@ -1744,7 +1744,7 @@ ifexpr
                         = let r = rangeNull
                           in  Case tst [Branch (PatCon nameTrue [] r r) [Guard guardTrue texpr]
                                        ,Branch (PatCon nameFalse [] r r) [Guard guardTrue eexpr]]
-                                       (combineRanged tst eexpr)
+                                       False (combineRanged tst eexpr)
 
        return fullMatch
   where
@@ -1769,11 +1769,13 @@ returnexpr
        return (makeReturn rng exp)
 
 
+matchexpr :: LexParser UserExpr
 matchexpr
-  = do rng <- keyword "match"
+  = do lazy <- option False (do{ specialId "lazy"; return True })
+       rng <- keyword "match"
        tst <- ntlexpr  -- allows tuples for multi pattern match
        (branches,rng2) <- semiBracesRanged1 branch
-       return (Case tst branches (combineRange rng rng2))
+       return (Case tst branches lazy (combineRange rng rng2))
   <|> handlerExpr
 
 -- TODO: fix parsing of handlers to match the grammar precisely

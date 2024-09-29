@@ -38,7 +38,7 @@ static bool kk_header_compare_and_swap(kk_header_t* dest /*out*/, kk_header_t* e
 static void kk_lazy_atomic_wait(kk_block_t* b, int32_t indirect_tag, kk_context_t* ctx) {
   // TODO: if we eval recursively, we could busy wait on ourselves
   kk_assert(kk_block_is_thread_shared(b));
-  kk_unused(indirect_tag);
+  kk_unused(indirect_tag); kk_unused(ctx);
   kk_header_t header;
   do {
     kk_atomic_yield(); // TODO: improve the busy wait

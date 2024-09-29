@@ -157,7 +157,7 @@ instance HasSymbols UserExpr where
     Bind d e _                            -> symbols d ++ symbols e
     App e nes _                           -> symbols e ++ symbols (map snd nes)
     Ann e _ _                             -> symbols e
-    Case e bs _                           -> symbols e ++ symbols bs
+    Case e bs _ _                         -> symbols e ++ symbols bs
     Parens e _ _ _                        -> symbols e
     Handler _ _ _ _ _ bs e1 e2 e3 hbs _ _ -> symbols bs ++ symbols e1
                                                         ++ symbols e2

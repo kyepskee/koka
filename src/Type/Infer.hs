@@ -870,9 +870,9 @@ inferExpr propagated expect (Handler handlerSort scoped HandlerOverride mbAllowM
            lam    = Lam [actionBind] (App h [(Nothing,mask)] rng) rng
        inferExpr propagated expect lam
 
-inferExpr propagated expect (Case expr branches rng)
+inferExpr propagated expect (Case expr branches isLazyMatch rng)
   = -- trace " inferExpr.Case" $
-    do (ctp,ceff,ccore) <- allowReturn False $ disallowHole $ inferExpr Nothing Instantiated expr
+    do (ctp,ceff,ccore0) <- allowReturn False $ disallowHole $ inferExpr Nothing Instantiated expr
        -- infer branches
        let matchedNames = extractMatchedNames expr
        bress <- disallowHole $
@@ -907,7 +907,7 @@ inferExpr propagated expect (Case expr branches rng)
        defName  <- currentDefName
        sbcores  <- subst bcores
        newtypes <- getNewtypes
-       let (matchIsTotal,warnings,cbranches) = analyzeBranches newtypes defName rng sbcores [stp] [dataInfo]
+       let (matchIsTotal,warnings,cbranches) = analyzeBranches newtypes defName rng sbcores [stp] [dataInfo] isLazyMatch
        mapM_ (\(rng,warning) -> infWarning rng warning) warnings
        cbranches <- if matchIsTotal
                   then return cbranches
@@ -923,8 +923,20 @@ inferExpr propagated expect (Case expr branches rng)
                                     inferUnify (checkEffectSubsume rng) rng eff resEff
                                     return (cbranches ++ [cbranch])
                             _ -> failure "Type.Infer.inferExpr.Case: should never happen, cexnBranch always contains a guard"
+       -- add lazy force
+       -- todo: warning if lazy match on regular datatype?
+       ccore1  <- if not isLazyMatch && (dataInfoIsLazy dataInfo)
+                    then do -- traceDefDoc $ \penv -> text "match force:" <+> prettyDataInfo penv False False  dataInfo
+                            let forceName = typeQualifiedName (dataInfoName dataInfo) "force"
+                            (force,_,forceInfo) <- resolveFunName forceName (CtxFunArgs False 1 [] Nothing) rng (getRange expr)
+                            let cforce   = coreExprFromNameInfo force forceInfo
+                                forceApp = case ccore0 of
+                                             Core.App (Core.Var fname _) [_] | force == Core.getName fname -> ccore0 -- don't duplicate as force(force(expr))
+                                             _ -> Core.App cforce [ccore0]
+                            return forceApp
+                  else return ccore0
        -- return core
-       core    <- subst (Core.Case [ccore] cbranches)
+       core    <- subst (Core.Case [ccore1] cbranches)
        sresEff <- subst resEff
        (gresTp,gcore) <- maybeInstantiateOrGeneralize rng (getRange branches) sresEff expect resTp core
        return (gresTp,sresEff,gcore)
@@ -1853,7 +1865,7 @@ inferImplicitUnpack rng nrng pname qname
                             | (fname,ftp) <- conInfoParams conInfo, not (nameIsNil fname)]
                   pat  = PatCon (conInfoName conInfo) [(Nothing,p) | p <- pats] nrng rangeNull {- no warnings for unused pattern variables by using a null range -}
                   unpack body
-                       = Case (Var pname False nrng) [Branch pat [Guard guardTrue body]] rng
+                       = Case (Var pname False nrng) [Branch pat [Guard guardTrue body]] False rng
                   bases :: [(Name,Name)]
                   bases = [(fname,fqname) | (fname,ftp) <- conInfoParams conInfo,
                                             nameStartsWith fname "base",
@@ -2441,7 +2453,7 @@ usesLocals lvars expr
       Bind   def expr range  -> usesLocalsDef lvars def || usesLocals lvars expr
       App    fun nargs range -> any (usesLocals lvars) (fun : map snd nargs)
       Ann    expr tp range   -> usesLocals lvars expr
-      Case   expr brs range  -> usesLocals lvars expr || any (usesLocalsBranch lvars) brs
+      Case   expr brs _ range  -> usesLocals lvars expr || any (usesLocalsBranch lvars) brs
       Parens expr name pre range -> usesLocals lvars expr
       Handler shallow scoped override allowMask eff pars reinit ret final ops hrng rng
                              -> or (usesLocalsMb lvars reinit : usesLocalsMb lvars ret : usesLocalsMb lvars final : map (usesLocalsOp lvars) ops)
