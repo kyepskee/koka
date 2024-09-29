@@ -385,9 +385,14 @@ lazyAddUpdate :: DataInfo -> ConInfo -> Name -> Expr t -> Expr t -> KInfer (Expr
 lazyAddUpdate info conInfo evalName arg topExpr
   = add topExpr
   where
-    whnfConstrs = map conInfoName (filter (not . conInfoIsLazy) (dataInfoConstrs info))
+    whnfConstrs = filter (not . conInfoIsLazy) (dataInfoConstrs info)
     modName     = qualifier (dataInfoName info)
-    isWhnfCon cname = (if isQualified cname then cname else qualify modName cname) `elem` whnfConstrs
+
+    lookupWhnfCon cname
+      = find (\cinfo -> (if isQualified cname then cname else qualify modName cname) == conInfoName cinfo) whnfConstrs
+
+    isWhnfCon cname
+      = isJust (lookupWhnfCon cname)
 
     -- add :: Expr t -> KInfer (Expr t)
     add expr
@@ -400,10 +405,10 @@ lazyAddUpdate info conInfo evalName arg topExpr
                                        return (Case expr brs' range)
           Parens expr name pre range -> do expr' <- add expr
                                            return $ Parens expr' name pre range
-          App (Var cname _ _) nargs range  | isWhnfCon cname
-            -> lazyUpdate expr
-          Var cname _ _ | isWhnfCon cname
-            -> lazyUpdate expr
+          App (Var cname _ _) nargs range
+            -> lazyUpdateCon cname expr
+          Var cname _ _
+            -> lazyUpdateCon cname expr
           _ -> unknownUpdate expr
 
     addBranch (Branch pattern guards)
@@ -414,12 +419,25 @@ lazyAddUpdate info conInfo evalName arg topExpr
       = do body' <- add body
            return $ Guard test body'
 
+
+    updateWarning rng doc
+      = do cs <- getColorScheme
+           addWarning rng $ text "Cannot update the lazy constructor" <+> color (colorCons cs) (pretty (unqualify (conInfoName conInfo))) <+> doc
+
+
+    lazyUpdateCon cname expr
+      = case lookupWhnfCon cname of
+          Nothing -> unknownUpdate expr
+          Just whnfCon -> do platform <- getPlatform
+                             let lazySize = Core.conReprAllocSize platform (Core.getConRepr info conInfo)
+                                 whnfSize = Core.conReprAllocSize platform (Core.getConRepr info whnfCon)
+                             when (lazySize < whnfSize) $
+                               updateWarning (getRange expr) $ text "in-place as the result constructor is larger (" <.> pretty lazySize <+> text "vs" <+> pretty whnfSize <+> text "bytes) -- using an indirection instead"
+                             lazyUpdate expr
+
     unknownUpdate expr
-      = -- unknown: give warning here?
-        do let rng = getRange expr
-           cs <- getColorScheme
-           addWarning rng $ text "Cannot update the lazy constructor" <+> color (colorCons cs) (pretty (unqualify (conInfoName conInfo))) <+>
-                            text "in-place as the result constructor is not statically known -- using an indirection instead"
+      = do let rng = getRange expr
+           updateWarning rng $ text "in-place as the result constructor is not statically known -- using an indirection instead"
            lazyUpdate (App (Var evalName False rng) [(Nothing,expr)] rng)
 
     -- lazyUpdate :: Expr t -> KInfer (Expr t)
@@ -445,7 +463,7 @@ synLazyWhnf info
         dataTp   = typeApp (TCon (TypeCon (dataInfoName info) (dataInfoKind info))) (map TVar (dataInfoParams info))
         fullTp   = tForall (dataInfoParams info) [] (typeFun [(nameNil,dataTp)] typePure dataTp )
 
-        argName   = newName "x"
+        argName   = newHiddenName "lazy"
         arg       = Var argName False rng
         expr      = Lam [ValueBinder argName Nothing Nothing rng rng] body xrng
         body      = Case tst [Branch (PatCon nameTrue [] rng rng) [Guard guardTrue eval]
@@ -476,7 +494,7 @@ synLazyForce info
         prefix s = (if (all (\conInfo -> not (null (conInfoParams conInfo))) (dataInfoConstrs info))
                      then "kk-datatype-" else "kk-datatype-ptr-") ++ s
 
-        argName   = newHiddenName "x"
+        argName   = newHiddenName "lazy"
         arg       = Var argName False rng
         expr      = Lam [ValueBinder argName Nothing Nothing rng rng] body xrng
         body      = Case tst [Branch (PatCon nameTrue [] rng rng) [Guard guardTrue arg]

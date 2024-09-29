@@ -416,7 +416,8 @@ ruLazyUpdate lazyTName arg
            let size = conReprAllocSize platform crepr
            if (lazySize < size)
              then -- the target is too small! (todo: can we check this already during kind inference?)
-                  do warning (\penv -> text "cannot update lazy value as it is not large enough -- using indirection")
+                  do -- warning is issued in Kind.Infer
+                     -- warning (\penv -> text "cannot update lazy value as it is not large enough -- using indirection")
                      lazyIndirect reuseName lazyInfo False (App con args)
              else if (size == 0)
                     then do -- singleton

@@ -173,7 +173,7 @@ prettyExternal env (External name tp pinfos body vis fip nameRng doc) | coreIfac
 prettyExternal env (External name tp pinfos body vis fip nameRng doc)
   = prettyComment env doc $
     prettyVis env vis $
-    keyword env (show fip ++ "extern") <+> prettyDefName env name  <.> prettyRange env nameRng
+    keyword env (sepBySpace [show fip,"extern"]) <+> prettyDefName env name  <.> prettyRange env nameRng
      <+> text ":" <+> prettyDefFunType env pinfos tp
      <+> prettyEntries body
   where

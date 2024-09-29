@@ -79,7 +79,7 @@ kk_decl_export void kk_lazy_atomic_leave(kk_block_t* b /* own */, kk_context_t* 
     kk_header_copy(&unblocked_header, &header);
     unblocked_header._field_idx = 0;
   } while (!kk_header_compare_and_swap(&b->header, &header, &unblocked_header));
-  kk_datatype_drop(lazy,ctx);
+  kk_block_drop(b,ctx);
 }
 
 /*

@@ -253,7 +253,7 @@ prettyDataInfo env0 showBody publicOnly info@(DataInfo datakind name kind args c
           -- DataDefRec     -> keyword env "recursive "
           DataDefOpen isExtend -> keyword env (if isExtend then "extend " else "open ")
           DataDefValue v  -> keyword env ("value" ++ show v ++ " ")
-          DataDefLazy fip -> keyword env (sepBySpace ["lazy",show fip])
+          DataDefLazy fip -> keyword env (sepBySpace ["lazy",show fip] ++ " ")
           _ -> empty) <.>
       (case dataEff of
          DataNoEffect -> empty
