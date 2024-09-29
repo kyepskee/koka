@@ -117,7 +117,7 @@ chkExpr expr
 
       App (TypeApp (Var tname _) _) _ | getName tname == nameCCtxSetCtxPath
                                      || nameStem (getName tname) `elem`
-                                        ["lazy-whnf-target","lazy-atomic-unblock","lazy-atomic-eval"]
+                                        ["lazy-whnf-target","lazy-atomic-leave","lazy-atomic-enter"]
         -> return ()
       App (TypeApp (Var tname _) _) [_, conApp] | nameStem (getName tname) `elem` ["lazy-update"]
         -> chkExpr conApp

@@ -45,8 +45,8 @@ createDataDef emitError emitWarning lookupDataInfo
        ddef  <- case defaultDef of
                   DataDefOpen isExtend
                     -> return (DataDefOpen isExtend)
-                  DataDefLazy
-                    -> return DataDefLazy
+                  DataDefLazy fip
+                    -> return (DataDefLazy fip)
 
                   DataDefNormal
                     -> do dd <- createMaxDataDef conInfos

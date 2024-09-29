@@ -15,6 +15,7 @@ module Type.Type (-- * Types
                   , DataInfo(..), DataKind(..), ConInfo(..), SynInfo(..)
                   , dataInfoIsOpen, dataInfoIsExtend, dataInfoIsLiteral
                   , conInfoSize, conInfoScanCount
+                  , conInfoIsLazy, dataInfoIsLazy, conInfoLazyFip
                   , eqType, eqTypes, elemType
                   -- Predicates
                   , splitPredType, shallowSplitPreds, shallowSplitVars
@@ -194,6 +195,10 @@ dataInfoIsLiteral info
   = let name = dataInfoName info
     in (name == nameTpInt || name == nameTpChar || name == nameTpString || name == nameTpFloat)
 
+dataInfoIsLazy :: DataInfo -> Bool
+dataInfoIsLazy dataInfo
+  = dataDefIsLazy (dataInfoDef dataInfo)
+
 -- | Constructor information: constructor name, name of the newtype, field types, and the full type of the constructor
 data ConInfo = ConInfo{ conInfoName :: !Name
                       , conInfoTypeName :: !Name
@@ -209,7 +214,7 @@ data ConInfo = ConInfo{ conInfoName :: !Name
                       , conInfoSingleton :: !Bool -- ^ is this the only constructor of this type?
                       , conInfoOrderedParams :: ![(Name,Type)] -- ^ fields ordered by size
                       , conInfoValueRepr :: !ValueRepr
-                      , conInfoIsLazy :: !Bool     -- also True for indirection nodes
+                      , conInfoLazy :: !(Maybe Fip)     -- also Just for indirection nodes
                       , conInfoTag :: !Int
                       , conInfoVis :: !Visibility
                       , conInfoDoc :: !String
@@ -227,6 +232,15 @@ conInfoSize platform conInfo
 conInfoScanCount :: ConInfo -> Int
 conInfoScanCount conInfo
   = valueReprScanCount (conInfoValueRepr conInfo)
+
+conInfoIsLazy :: ConInfo -> Bool
+conInfoIsLazy conInfo = isJust (conInfoLazy conInfo)
+
+conInfoLazyFip :: ConInfo -> Fip
+conInfoLazyFip conInfo
+  = case conInfoLazy conInfo of
+      Just fip -> fip
+      Nothing  -> noFip
 
 -- | A type synonym is quantified by type parameters
 data SynInfo = SynInfo{ synInfoName :: Name

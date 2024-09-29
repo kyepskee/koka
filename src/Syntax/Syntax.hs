@@ -160,13 +160,15 @@ data UserCon t u k
             , userconExists :: ![TypeBinder k] -- ^ existentials
             , userconParams :: ![(Visibility,ValueBinder t (Maybe (Expr u)))]            -- ^ parameters
             , userconResult :: !(Maybe t) -- ^ used internally for limited GADT's (for now)
-            , userConLazy :: !(Maybe (Expr u)) -- lazy constructor?
+            , userConLazy :: !(Maybe (Fip,Expr u)) -- lazy constructor?
             , userconNameRange :: !Range       --  ^ name range
             , userconRange :: !Range           --  ^ total range
             , userconVis :: !Visibility     -- ^  visibility
             , userconDoc :: !String
             }
   deriving (Show)
+
+data UserConLazy
 
 {--------------------------------------------------------------------------
   Definitions

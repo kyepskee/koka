@@ -404,7 +404,7 @@ boxConInfo
             Inductive rangeNull [] [Public] True
             [(nameNil,TVar a)]
             (valueReprScan 1) {- size is wrong with knowing the platform ? -}
-            False 1 Public ""
+            Nothing 1 Public ""
   where
     tp = TForall [a] [] (TFun [(nameNil,TVar a)] typeTotal typeBoxStar)
     a  = TypeVar (0) kindStar Bound

@@ -221,8 +221,8 @@ typeDecl env
        return (Synonym synInfo, envExtendSynonym env synInfo)
 
 conDecl tname foralls sort env
-  = do (vis,isLazy) <- try $ do vis <- vispub
-                                lazy <- option False (do{ keyword "lazy"; return True })
+  = do (vis,mbLazy) <- try $ do vis <- vispub
+                                lazy <- option Nothing (do{ keyword "lazy"; fip <- parseTailFip; return (Just fip) })
                                 keyword "con"
                                 return (vis,lazy)
        (name,(_,doc)) <- docconid
@@ -237,7 +237,7 @@ conDecl tname foralls sort env
        let params2 = [(if nameIsNil name then newFieldName i else name, tp) | ((name,tp),i) <- zip params [1..]]
            orderedFields = []  -- no need to reconstruct as it is only used during codegen?
        let con = (ConInfo (qualify (modName env) name) tname foralls existss params2 tp sort range (map (const range) params2) (map (const Public) params2) False
-                             orderedFields vrepr isLazy (fromInteger tag) vis doc)
+                             orderedFields vrepr mbLazy (fromInteger tag) vis doc)
        -- trace (show con ++ ": " ++ show params2) $
        return con
 
@@ -253,7 +253,7 @@ parseTypeMod :: LexParser (DataDef,DataKind,DataEffect)
 parseTypeMod
  =   do{ specialId "open"; return (DataDefOpen False, Inductive, DataNoEffect) }
  <|> do{ specialId "extend"; return (DataDefOpen True, Inductive, DataNoEffect) }
- <|> do{ specialId "lazy"; return (DataDefLazy, Inductive, DataNoEffect) }
+ <|> do{ specialId "lazy"; fip <- parseTailFip; return (DataDefLazy fip, Inductive, DataNoEffect) }
  <|> do specialId "value"
         vrepr <- parseValueRepr
         return (DataDefValue vrepr, Inductive, DataNoEffect)
@@ -311,7 +311,7 @@ pdefSort
   = do isRec <- do{ specialId "recursive"; return True } <|> return False
        inl <- parseInline
        try $
-        (do fip <- parseFip
+        (do fip <- parseTailFip
             (_,doc) <- dockeyword "fun"
             _       <- do { specialOp "**"; return ()}
                        <|>
@@ -329,7 +329,7 @@ pdefSort
 externDecl :: Env -> LexParser External
 externDecl env
   = do (vis,fip,doc)  <- try $ do vis <- vispub
-                                  fip <- parseFip
+                                  fip <- parseTailFip
                                   (_,doc) <- dockeyword "extern"
                                   return (vis,fip,doc)
        (name,_) <- funid True
@@ -421,7 +421,7 @@ inlineDefSort
                     (s,_) <- stringLit
                     return [if c == '^' then Borrow else Own | c <- s]
                  <|> return []
-       (do (fip,doc) <- try $ do fip <- parseFip
+       (do (fip,doc) <- try $ do fip <- parseTailFip
                                  (_,doc) <- dockeyword "fun"
                                  return (fip,doc)
            return (DefFun pinfos fip,inl,isRec,spec,doc)

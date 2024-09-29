@@ -395,7 +395,8 @@ ruLazyUpdate lazyTName arg
                    -- singleton uses an indirection
                    Con cname repr -> lazyIndirect reuseName lazyInfo True tailArg
                    -- otherwise use an indirection
-                   _ -> do warning (\penv -> text "cannot update lazy value directly as the whnf is not statically known -- using indirection")
+                   _ -> do -- no warning needed as it is checked in Kind.Infer
+                           -- warning (\penv -> text "cannot update lazy value directly as the whnf is not statically known -- using indirection")
                            lazyIndirect reuseName lazyInfo False tailArg
   where
     ppName penv name = prettyName (Pretty.colors penv) name
@@ -414,7 +415,7 @@ ruLazyUpdate lazyTName arg
       = do platform <- getPlatform
            let size = conReprAllocSize platform crepr
            if (lazySize < size)
-             then -- the target is too small!
+             then -- the target is too small! (todo: can we check this already during kind inference?)
                   do warning (\penv -> text "cannot update lazy value as it is not large enough -- using indirection")
                      lazyIndirect reuseName lazyInfo False (App con args)
              else if (size == 0)
@@ -866,7 +867,7 @@ getLazyIndirectCon lazyTName
        case getDataInfo newtypes (typeOf lazyTName) of
          Nothing -> do return Nothing
          Just (_,dataInfo)
-           -> case filter (\cinfo -> "Indirect" `isSuffixOf` nameStem (conInfoName cinfo) ) (dataInfoConstrs dataInfo) of
+           -> case filter (\cinfo -> isLazyIndirectConName (conInfoName cinfo) ) (dataInfoConstrs dataInfo) of
                 [cinfo] | length (conInfoParams cinfo) == 1
                   -> return (Just (cinfo,getConRepr dataInfo cinfo))
                 _ -> do return Nothing

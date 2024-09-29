@@ -156,7 +156,7 @@ patExprBool name tag
   = let tname   = TName name typeBool
         conEnum = ConEnum nameTpBool DataEnum valueReprZero tag
         conInfo = ConInfo name nameTpBool [] [] [] (TFun [] typeTotal typeBool) Inductive rangeNull [] [] False
-                            [] valueReprZero False tag Public ""
+                            [] valueReprZero Nothing tag Public ""
         pat = PatCon tname [] conEnum [] [] typeBool conInfo False
         expr = Con tname conEnum
     in (pat,expr)

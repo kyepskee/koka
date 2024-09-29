@@ -252,8 +252,8 @@ prettyDataInfo env0 showBody publicOnly info@(DataInfo datakind name kind args c
       (case datadef of
           -- DataDefRec     -> keyword env "recursive "
           DataDefOpen isExtend -> keyword env (if isExtend then "extend " else "open ")
-          DataDefValue v -> keyword env ("value" ++ show v ++ " ")
-          DataDefLazy    -> keyword env "lazy "
+          DataDefValue v  -> keyword env ("value" ++ show v ++ " ")
+          DataDefLazy fip -> keyword env (sepBySpace ["lazy",show fip])
           _ -> empty) <.>
       (case dataEff of
          DataNoEffect -> empty
@@ -277,7 +277,9 @@ prettyConInfo env0 publicOnly (ConInfo conName ntname foralls exists fields sche
   = if (publicOnly && isPrivate vis) then empty else
     (prettyComment env0 doc $
       (if publicOnly then empty else ppVis env0 vis) <.>
-      (if isLazy then keyword env0 "lazy " else empty) <.>
+      (case isLazy of
+         Nothing  -> empty
+         Just fip -> keyword env0 (sepBySpace ["lazy",show fip]) <.> space) <.>
       keyword env0 "con" <+>
       ppName env0 conName <.> pretty range <.>
       (if null exists then empty else (angled (map (ppTypeVar env) exists))) <.>

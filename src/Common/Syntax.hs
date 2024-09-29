@@ -16,7 +16,7 @@ module Common.Syntax( Visibility(..)
                     , DefSort(..), isDefFun, defFun, defFunEx, defSortShowFull
                     , ParamInfo(..)
                     , DefInline(..)
-                    , Fip(..), FipAlloc(..), fipIsTail, fipAlloc, noFip, isNoFip
+                    , Fip(..), FipAlloc(..), fipIsTail, fipAlloc, noFip, isNoFip, isFipTop, fipMax, fipTop, fipBot, fipNoAlloc
                     , Target(..), CTarget(..), JsTarget(..), isTargetC, isTargetJS, isTargetWasm
                     , isPublic, isPrivate
                     , DataDef(..)
@@ -32,6 +32,7 @@ module Common.Syntax( Visibility(..)
                     , platformHasCompressedFields
                     , alignedSum, alignedAdd, alignUp
                     , BuildType(..)
+                    , sepBySpace
                     ) where
 
 import Data.List(intersperse)
@@ -207,7 +208,7 @@ instance Show DataKind where
 
 data DataDef = DataDefValue !ValueRepr  -- value type
              | DataDefNormal            -- reference type
-             | DataDefLazy              -- lazy reference type
+             | DataDefLazy !Fip         -- lazy reference type
              -- | DataDefEffect{ dataDefIsLinear :: !Bool, dataDefIsNamed :: !Bool }  -- effect types
              | DataDefOpen{ isExtend :: !Bool }
              | DataDefAuto{ dataDefDeclaredAsStruct :: !Bool }  -- value or reference type: determined by kind inference in (Kind/Repr.hs:createDataDef)
@@ -215,9 +216,9 @@ data DataDef = DataDefValue !ValueRepr  -- value type
 
 instance Show DataDef where
   show dd = case dd of
-              DataDefValue v   -> "value" ++ show v
-              DataDefNormal    -> "reference"
-              DataDefLazy      -> "lazy"
+              DataDefValue v       -> "value" ++ show v
+              DataDefNormal        -> "reference"
+              DataDefLazy fip      -> sepBySpace ["lazy",show fip]
               DataDefOpen isExtend -> if isExtend then "extend" else "open"
               DataDefAuto isStruct -> "auto" ++ (if isStruct then " struct" else "")
               -- DataDefEffect linear named -> (if linear then "linear " else "") ++ (if named then "named " else "") ++ "effect"
@@ -245,7 +246,7 @@ dataDefIsNormal ddef
 
 dataDefIsLazy ddef
   = case ddef of
-      DataDefLazy   -> True
+      DataDefLazy _ -> True
       _ -> False
 
 dataDefSize :: Platform -> DataDef -> Int
@@ -324,7 +325,7 @@ defFun pinfos = defFunEx pinfos noFip
 defSortShowFull :: DefSort -> String
 defSortShowFull ds
   = case ds of
-      DefFun pinfos fip -> show fip ++ "fun"
+      DefFun pinfos fip -> sepBySpace [show fip,"fun"]
       DefVal -> "val"
       DefVar -> "var"
 
@@ -370,6 +371,8 @@ data Fip = Fip   { fipAlloc_ :: !FipAlloc }
          | Fbip  { fipAlloc_ :: !FipAlloc, fipTail :: !Bool }
          | NoFip { fipTail :: !Bool }
          deriving (Eq,Ord)
+         -- TODO: ordening seems wrong as `NoFip False` should be the top
+         --       but now NoFip True is the top.
 
 data FipAlloc = AllocAtMost !Int | AllocFinitely | AllocUnlimited
          deriving (Eq)
@@ -394,11 +397,19 @@ instance Semigroup FipAlloc where
 instance Monoid FipAlloc where
   mempty = AllocAtMost 0
 
-noFip :: Fip
-noFip = NoFip False
+noFip, fipNoAlloc :: Fip
+noFip = fipTop
+fipNoAlloc = fipBot
 
 isNoFip (NoFip _) = True
 isNoFip _         = False
+
+fipBot     = Fip (AllocAtMost 0)
+fipTop     = NoFip False
+
+isFipTop (NoFip False) = True
+isFipTop _             = False
+
 
 fipIsTail :: Fip -> Bool
 fipIsTail fip
@@ -417,16 +428,40 @@ fipAlloc fip
 instance Show Fip where
   show fip  = case fip of
                 Fip n       -> "fip" ++ showN n
-                Fbip n t    -> showTail t ++ "fbip" ++ showN n
+                Fbip n t    -> sepBySpace [showTail t,"fbip" ++ showN n]
                 NoFip t     -> showTail t
             where
-              showN (AllocAtMost 0) = " "
-              showN (AllocAtMost n) = "(" ++ show n ++ ") "
-              showN AllocFinitely   = "(n) "
+              showN (AllocAtMost 0) = ""
+              showN (AllocAtMost n) = "(" ++ show n ++ ")"
+              showN AllocFinitely   = "(n)"
               showN AllocUnlimited  = ""
 
-              showTail True  = "tail "
-              showTail _     = " "
+              showTail True  = "tail"
+              showTail _     = ""
 
+sepBySpace :: [String] -> String
+sepBySpace xs
+  = concat $ intersperse " " $ filter (not . null) xs
 
+fipMax :: Fip -> Fip -> Fip
+fipMax fip1 fip2
+  = case (fip1,fip2) of
+      (NoFip isTail1, NoFip isTail2) -> NoFip (isTail1 && isTail2)
+      (NoFip t1, _)                  -> NoFip (t1 && fipIsTail fip2)
+      (_,NoFip t2)                   -> NoFip (fipIsTail fip1 && t2)
+
+      (Fbip a1 t1, Fbip a2 t2)       -> Fbip (fipAllocMax a1 a2) (t1 && t2)
+      (Fbip a1 t1, Fip a2)           -> Fbip (fipAllocMax a1 a2) t1
+      (Fip a1, Fbip a2 t2)           -> Fbip (fipAllocMax a1 a2) t2
+
+      (Fip a1, Fip a2)               -> Fip (fipAllocMax a1 a2)
+
+fipAllocMax :: FipAlloc -> FipAlloc -> FipAlloc
+fipAllocMax a1 a2
+  = case (a1,a2) of
+      (AllocUnlimited,_)     -> AllocUnlimited
+      (_,AllocUnlimited)     -> AllocUnlimited
+      (AllocFinitely,_)      -> AllocFinitely
+      (_,AllocFinitely)      -> AllocFinitely
+      (AllocAtMost n1,AllocAtMost n2) -> AllocAtMost (max n1 n2)
 

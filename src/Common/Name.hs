@@ -785,14 +785,17 @@ toOpsConName :: Name -> Name
 toOpsConName name
   = makeHiddenName "Ops" name
 
+
+indirectName = newName "Indirect"
+
 -- | Create an lazy indirect constructor name from a type name.
 toLazyIndirectConName :: Name -> Name
-toLazyIndirectConName name
-  = makeHiddenName "Indirect" name
+toLazyIndirectConName typeName
+  = typeQualifiedNameOf typeName indirectName -- "Indirect" -- makeHiddenName "Indirect" name
 
 isLazyIndirectConName :: Name -> Bool
 isLazyIndirectConName name
-  = hiddenNameStartsWith name "Indirect"
+  = stemIsEqual name indirectName -- hiddenNameStartsWith name "Indirect"
 
 
 -- | Create an open tag name from a constructor name in an open type

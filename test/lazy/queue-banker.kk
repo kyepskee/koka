@@ -32,20 +32,20 @@ inline fip extern kk-datatype-ptr-is-thread-shared(^x : a) : bool
   c "kk_datatype_ptr_is_thread_shared"
 
 
-type stream<a>
+lazy type stream<a>
   SNil
   SCons( head : a, tail : stream<a> )
   // will be generated
   SIndirect( s : stream<a> )
   // user writes:
-  lazy SAppRev( pre : stream<a>, post : list<a> ) ->
+  lazy fbip SAppRev( pre : stream<a>, post : list<a> ) ->
     match pre
       // this gives a warning
       SNil        -> sreverse(post)  // (A)
 
       // but not this
       SNil        -> match post
-                      Cons(x,xx) -> SCons(x,sreverse(xx)
+                      Cons(x,xx) -> SCons(x,sreverse(xx))
                       Nil        -> SNil
       SCons(x,xx) -> SCons(x,SAppRev(xx,post))
       _           -> SNil // cannot happen, fix match analysis
