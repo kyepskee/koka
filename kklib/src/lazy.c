@@ -22,9 +22,9 @@ static void kk_header_atomic_load_acquire(kk_header_t* dest /*out*/, kk_header_t
   *((kk_uint_header_t*)dest) = kk_atomic_load_acquire((const _Atomic(kk_uint_header_t)*)src);
 }
 
-static void kk_header_atomic_store_release(kk_header_t* dest /*out*/, kk_header_t* src /*in*/) {
-  kk_atomic_store_release((_Atomic(kk_uint_header_t)*)dest, *((kk_uint_header_t*)src));
-}
+// static void kk_header_atomic_store_release(kk_header_t* dest /*out*/, kk_header_t* src /*in*/) {
+//   kk_atomic_store_release((_Atomic(kk_uint_header_t)*)dest, *((kk_uint_header_t*)src));
+// }
 
 static void kk_header_copy(kk_header_t* dest /*out*/, kk_header_t* src /*in*/) {
   *((kk_uint_header_t*)dest) = *((kk_uint_header_t*)src);
@@ -69,7 +69,7 @@ kk_decl_export bool kk_lazy_atomic_thread_enter(kk_block_t* b /* borrow */, int3
   return true;
 }
 
-kk_decl_export void kk_lazy_atomic_leave(kk_block_t* b /* own */, kk_context_t* ctx) {
+kk_decl_export void kk_lazy_atomic_thread_leave(kk_block_t* b /* own */, kk_context_t* ctx) {
   kk_assert(kk_block_is_thread_shared(b));
   kk_header_t unblocked_header;
   kk_header_t header;

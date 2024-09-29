@@ -450,6 +450,7 @@ basicexpr   : ifexpr
 /* keyword expressions */
 
 matchexpr   : MATCH ntlexpr '{' semis matchrules '}'
+            | ID_LAZY MATCH ntlexpr '{' semis matchrules '}'
             ;
 
 fnexpr      : FN funbody                     /* anonymous function */

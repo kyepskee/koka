@@ -39,12 +39,12 @@ static inline void kk_lazy_atomic_leave(kk_datatype_t lazy, kk_context_t* ctx) {
 }
 
 static inline bool kk_datatype_is_whnf( kk_datatype_t lazy, int32_t indirect_tag, kk_context_t* ctx ) {
-  return (kk_datatype_is_singleton(lazy) || kk_datatype_ptr_tag(lazy,ctx) < indirect_tag);
+  return (kk_datatype_is_singleton(lazy) || kk_datatype_ptr_tag(lazy,ctx) < (kk_tag_t)indirect_tag);
 }
 
 static inline bool kk_datatype_ptr_is_whnf( kk_datatype_t lazy, int32_t indirect_tag, kk_context_t* ctx ) {
   kk_assert(kk_datatype_is_ptr(lazy));
-  return (kk_datatype_ptr_tag(lazy,ctx) < indirect_tag);
+  return (kk_datatype_ptr_tag(lazy,ctx) < (kk_tag_t)indirect_tag);
 }
 
 
