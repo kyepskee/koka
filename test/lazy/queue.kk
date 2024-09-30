@@ -4,11 +4,6 @@ import std/os/env
 import std/num/random
 import std/num/int32
 
-pub value type maybe2<a,b>
-  Nothing2
-  Just2(justa:a,justb:b)
-
-
 pub alias rndstate = sfc
 alias rndres = sfc-result
 
