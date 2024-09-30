@@ -390,14 +390,14 @@ lazyAddUpdate :: DataInfo -> ConInfo -> Name -> Expr t -> Expr t -> KInfer (Expr
 lazyAddUpdate info conInfo evalName arg topExpr
   = add topExpr
   where
-    whnfConstrs = filter (not . conInfoIsLazy) (dataInfoConstrs info)
+    (lazyConstrs,whnfConstrs) = partition conInfoIsLazy (dataInfoConstrs info)
     modName     = qualifier (dataInfoName info)
 
-    lookupWhnfCon cname
-      = find (\cinfo -> (if isQualified cname then cname else qualify modName cname) == conInfoName cinfo) whnfConstrs
+    lookupCon cname constrs
+      = find (\cinfo -> (if isQualified cname then cname else qualify modName cname) == conInfoName cinfo) constrs
 
     isWhnfCon cname
-      = isJust (lookupWhnfCon cname)
+      = isJust (lookupCon cname whnfConstrs)
 
     -- add :: Expr t -> KInfer (Expr t)
     add expr
@@ -406,7 +406,7 @@ lazyAddUpdate info conInfo evalName arg topExpr
           Let    defs expr range -> (\expr' -> Let defs expr' range) <$> add expr
           Bind   def expr range  -> (\expr' -> Bind def expr' range) <$> add expr
           Ann    expr tp range   -> (\expr' -> Ann expr' tp range) <$> add expr
-          Case   expr brs lazy range
+          Case   expr brs lazyMatch range
             -> do brs' <- mapM addBranch brs
                   -- specialize force insertion here so the dependency is known
                   -- for all other matches, this is done during type inference
@@ -419,10 +419,10 @@ lazyAddUpdate info conInfo evalName arg topExpr
                             _                    -> False
                       isWhnfConBranch (Branch pat guards) = isWhnfConPat pat
                       forceName = typeQualifiedName (dataInfoName info) "force"
-                      exprForce = if any isWhnfConBranch brs
+                      exprForce = if not lazyMatch && any isWhnfConBranch brs
                                     then App (Var forceName False (getRange expr)) [(Nothing,expr)] (getRange expr)
                                     else expr
-                  return (Case exprForce brs' lazy range)
+                  return (Case exprForce brs' lazyMatch range)
           Parens expr name pre range -> do expr' <- add expr
                                            return $ Parens expr' name pre range
           App (Var cname _ _) nargs range
@@ -440,24 +440,32 @@ lazyAddUpdate info conInfo evalName arg topExpr
            return $ Guard test body'
 
 
-    updateWarning rng doc
+    updateWarning rng fdoc
       = do cs <- getColorScheme
-           addWarning rng $ text "Cannot update the lazy constructor" <+> color (colorCons cs) (pretty (unqualify (conInfoName conInfo))) <+> doc
+           let showConName name = color (colorCons cs) (pretty (unqualify name))
+           addWarning rng $ text "Cannot update the lazy constructor" <+> showConName (conInfoName conInfo) <+> fdoc showConName
 
 
     lazyUpdateCon cname expr
-      = case lookupWhnfCon cname of
-          Nothing -> unknownUpdate expr
+      = case lookupCon cname whnfConstrs of
+          Nothing -> case lookupCon cname lazyConstrs of
+                       Nothing     -> unknownUpdate expr
+                       Just cinfo  -> recursiveUpdate expr cinfo
           Just whnfCon -> do platform <- getPlatform
                              let lazySize = Core.conReprAllocSize platform (Core.getConRepr info conInfo)
                                  whnfSize = Core.conReprAllocSize platform (Core.getConRepr info whnfCon)
                              when (lazySize < whnfSize) $
-                               updateWarning (getRange expr) $ text "in-place as the result constructor is larger (" <.> pretty lazySize <+> text "vs" <+> pretty whnfSize <+> text "bytes) -- using an indirection instead"
+                               updateWarning (getRange expr) $ \_ -> text "in-place as the result constructor is larger (" <.> pretty lazySize <+> text "vs" <+> pretty whnfSize <+> text "bytes) -- using an indirection instead"
                              lazyUpdate expr
 
     unknownUpdate expr
       = do let rng = getRange expr
-           updateWarning rng $ text "in-place as the result constructor is not statically known -- using an indirection instead"
+           updateWarning rng $ \_ -> text "in-place as the result constructor is not statically known -- using an indirection instead"
+           lazyUpdate (App (Var evalName False rng) [(Nothing,expr)] rng)
+
+    recursiveUpdate expr cinfo
+      = do let rng = getRange expr
+           updateWarning rng $ \showCon -> text "in-place as the lazy result constructor" <+> showCon (conInfoName cinfo) <+> text "needs to be recursively forced -- using an indirection instead"
            lazyUpdate (App (Var evalName False rng) [(Nothing,expr)] rng)
 
     -- lazyUpdate :: Expr t -> KInfer (Expr t)
