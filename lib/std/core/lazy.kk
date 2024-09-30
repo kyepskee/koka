@@ -17,7 +17,7 @@ import std/core/types
 
 // internal: marker for lazy values that get matched to evaluate to whnf
 pub fip extern whnf-target(target : a) : ()
-  inline ""
+  inline "/**/"
 
 // internal: explicitly force update-in-place for lazy values
 pub fip extern whnf-update(target : a, x : a) : a

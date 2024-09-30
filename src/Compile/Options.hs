@@ -1129,7 +1129,8 @@ ccFlagsBuildFromFlags cc flags
 
 gnuWarn = words "-Wall -Wextra -Wpointer-arith -Wshadow -Wstrict-aliasing" ++
           words "-Wno-unknown-pragmas -Wno-missing-field-initializers" ++
-          words "-Wno-unused-parameter -Wno-unused-variable -Wno-unused-value"
+          words "-Wno-unused-parameter -Wno-unused-variable -Wno-unused-value" ++
+          words "-Wno-unused-but-set-variable"
 
 ccGcc,ccMsvc :: String -> Int -> Platform -> FilePath -> CC
 ccGcc name opt platform path
@@ -1139,7 +1140,7 @@ ccGcc name opt platform path
           (RelWithDebInfo,["-O2", "-g", "-DNDEBUG"] ++ arch),
           (Release,       ["-O2", "-DNDEBUG"] ++ arch) ]
         )
-        (gnuWarn ++ ["-Wno-unused-but-set-variable"])
+        (gnuWarn)
         (["-c"]) -- ++ (if onWindows then [] else ["-D_GNU_SOURCE"]))
         []
         (\stksize -> if (onMacOS && stksize > 0)  -- stack size is usually set programmatically (except on macos/windows)
@@ -1208,7 +1209,7 @@ ccFromPath flags path
                      }
         clang   = gcc{ ccFlagsWarn = gnuWarn
                                      ++ words "-Wno-cast-qual -Wno-undef -Wno-reserved-id-macro -Wno-unused-macros -Wno-cast-align"
-                                     ++ (if onMacOS && cpuArch == "arm64" then ["-Wno-unknown-warning-option","-Wno-unused-but-set-variable"] else [])
+                                     ++ (if onMacOS && cpuArch == "arm64" then ["-Wno-unknown-warning-option"] else [])
                      }
         generic = gcc{ ccFlagsWarn = [] }
         msvc    = ccMsvc name (optimize flags) (platform flags) path
@@ -1344,10 +1345,10 @@ findCC paths []
   = do -- putStrLn "warning: cannot find C compiler -- default to 'gcc'"
        return ("gcc","gcc")
 findCC paths (name:rest)
-  = do let xpaths = paths ++ 
+  = do let xpaths = paths ++
                     if onWindows && name `startsWith` "clang"
                       then ["C:/Program Files/LLVM/bin"]
-                      else []                      
+                      else []
        mbPath <- searchPaths xpaths [exeExtension] name
        case mbPath of
          Nothing   -> findCC paths rest
