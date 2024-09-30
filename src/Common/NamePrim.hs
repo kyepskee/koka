@@ -111,6 +111,12 @@ module Common.NamePrim
           , nameTpDelay
           -- * Lists
           , nameListNil, nameCons, nameTpList
+          -- * Lazy
+          , nameLazyTarget, nameLazyUpdate
+          , nameLazyEnter, nameLazyLeave
+          , nameLazyIsWhnf, nameLazyPtrIsWhnf
+          , nameDataTypePtrIsUnique, nameDataTypePtrIsThreadShared
+
           -- * Type constructors
           , nameEffectEmpty, nameEffectExtend, nameEffectAppend
 
@@ -251,6 +257,19 @@ nameLog         = qualify nameCoreDebug (newName "log")
 nameCoreFileFile   = qualify nameCoreDebug (newLocallyQualified "" "file" "kk-file")
 nameCoreFileLine   = qualify nameCoreDebug (newLocallyQualified "" "file" "kk-line")
 nameCoreFileModule = qualify nameCoreDebug (newLocallyQualified "" "file" "kk-module")
+
+{--------------------------------------------------------------------------
+  std/core/lazy
+--------------------------------------------------------------------------}
+
+nameLazyTarget    = coreLazyName "whnf-target"
+nameLazyUpdate    = coreLazyName "whnf-update"
+nameLazyEnter     = coreLazyName "atomic-enter"
+nameLazyLeave     = coreLazyName "atomic-leave"
+nameLazyIsWhnf    = coreLazyName "datatype-is-whnf"
+nameLazyPtrIsWhnf = coreLazyName "datatype-ptr-is-whnf"
+nameDataTypePtrIsUnique = coreLazyName "datatype-ptr-is-unique"
+nameDataTypePtrIsThreadShared = coreLazyName "datatype-ptr-is-thread-shared"
 
 {--------------------------------------------------------------------------
   std/core/vector
@@ -519,6 +538,7 @@ coreListName s  = newQualified "std/core/list" s
 coreExnName s   = newQualified "std/core/exn" s
 coreVectorName s= newQualified "std/core/vector" s
 coreStringName s= newQualified "std/core/string" s
+coreLazyName s  = newQualified "std/core/lazy" s
 
 nameSystemCore  = newModuleName "std/core"
 nameCoreHnd     = newModuleName "std/core/hnd"

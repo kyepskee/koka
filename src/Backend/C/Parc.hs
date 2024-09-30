@@ -102,11 +102,9 @@ parcTopLevelExpr _ expr = parcExpr expr
 parcExpr :: Expr -> Parc Expr
 parcExpr expr
   = case expr of
-      App (Var name _) _ | nameStem (getName name) == "lazy-whnf-target"
-                        || nameStem (getName name) == "whitehole"
-                        || nameStem (getName name) == "blackhole"
+      App (Var name _) _ | getName name == nameLazyTarget
         -> do return expr
-      App (Var name varInfo) [var, conApp] | nameStem (getName name) == "lazy-update"
+      App (Var name varInfo) [var, conApp] | getName name == nameLazyUpdate
         -> do conApp' <- parcExpr conApp
               return $ App (Var name varInfo) [var, conApp']
 

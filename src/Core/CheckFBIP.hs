@@ -39,7 +39,8 @@ import Core.Pretty
 import Core.CoreVar
 import Core.Borrowed
 import Common.NamePrim (nameEffectEmpty, nameTpDiv, nameEffectOpen, namePatternMatchError, nameTpException, nameTpPartial, nameTrue,
-                        nameCCtxSetCtxPath, nameFieldAddrOf, nameTpInt)
+                        nameCCtxSetCtxPath, nameFieldAddrOf, nameTpInt,
+                        nameLazyTarget,nameLazyLeave,nameLazyEnter,nameLazyUpdate)
 import Backend.C.ParcReuse (getFixedDataAllocSize)
 import Backend.C.Parc (getDataInfo')
 import Data.Ratio
@@ -115,11 +116,9 @@ chkExpr expr
               out <- extractOutput $ chkExpr body
               writeOutput =<< foldM (\out nm -> bindName nm Nothing out) out pars
 
-      App (TypeApp (Var tname _) _) _ | getName tname == nameCCtxSetCtxPath
-                                     || nameStem (getName tname) `elem`
-                                        ["lazy-whnf-target","lazy-atomic-leave","lazy-atomic-enter"]
+      App (TypeApp (Var tname _) _) _ | getName tname `elem` [nameCCtxSetCtxPath,nameLazyTarget,nameLazyEnter,nameLazyLeave]
         -> return ()
-      App (TypeApp (Var tname _) _) [_, conApp] | nameStem (getName tname) `elem` ["lazy-update"]
+      App (TypeApp (Var tname _) _) [_, conApp] | getName tname == nameLazyUpdate
         -> chkExpr conApp
 
       App fn args -> chkApp fn args

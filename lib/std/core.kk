@@ -31,6 +31,7 @@ pub import std/core/list
 pub import std/core/maybe
 pub import std/core/either
 pub import std/core/tuple
+pub import std/core/lazy
 pub import std/core/show
 pub import std/core/debug
 pub import std/core/delayed

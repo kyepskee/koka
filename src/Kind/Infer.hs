@@ -364,7 +364,7 @@ synLazyEval lazyExprs info
        branches <- mapM branch lazyConstrs
 
        let  expr      = Lam [ValueBinder argName Nothing Nothing rng rng] (Bind mark body rng) xrng
-            mark      = Def (ValueBinder nameNil () (App (Var (newName "lazy-whnf-target") False rng) [(Nothing,arg)] rng) rng rng) rng Private DefVal InlineNever ""
+            mark      = Def (ValueBinder nameNil () (App (Var nameLazyTarget False rng) [(Nothing,arg)] rng) rng rng) rng Private DefVal InlineNever ""
             body      = Case arg (branches ++ [Branch (PatWild rng) [Guard guardTrue arg]]) True rng
             def = Def (ValueBinder defName () expr rng rng) rng (dataInfoVis info) (DefFun [] (lazyFip info)) InlineNever ""
        return $ DefNonRec def
@@ -463,7 +463,7 @@ lazyAddUpdate info conInfo evalName arg topExpr
     -- lazyUpdate :: Expr t -> KInfer (Expr t)
     lazyUpdate expr
       = let rng = getRange expr
-        in return $ App (Var (newName "lazy-update") False rng) [(Nothing,arg),(Nothing,expr)] rng
+        in return $ App (Var nameLazyUpdate False rng) [(Nothing,arg),(Nothing,expr)] rng
 
 
 {-
@@ -489,14 +489,14 @@ synLazyWhnf info
         body      = Case tst [Branch (PatCon nameTrue [] rng rng) [Guard guardTrue eval]
                              ,Branch (PatCon nameFalse [] rng rng) [Guard guardTrue atomic]] False rng
         tst       = App (Var nameOr False rng)
-                     [(Nothing,App (Var (newName "kk-datatype-ptr-is-unique") False rng) [(Nothing,arg)] rng),
+                     [(Nothing,App (Var nameDataTypePtrIsUnique False rng) [(Nothing,arg)] rng),
                       (Nothing,App (Var (newQualified "std/core/types" "not") False rng)
-                                   [(Nothing, App (Var (newName "lazy-atomic-enter") False rng)
+                                   [(Nothing, App (Var nameLazyEnter False rng)
                                                   [(Nothing,arg),(Nothing,Var (lazyName info "lazy-tag") False rng)] rng)] rng)] rng
         eval      = App (Var (lazyName info "eval") False rng) [(Nothing,arg)] rng
         atomic    = let v = newName "v"
                         vdef = Def (ValueBinder v () eval rng rng) rng Private DefVal InlineNever ""
-                        bdef = Def (ValueBinder nameNil () (App (Var (newName "lazy-atomic-leave") False rng) [(Nothing,arg)] rng) rng rng) rng Private DefVal InlineNever ""
+                        bdef = Def (ValueBinder nameNil () (App (Var nameLazyLeave False rng) [(Nothing,arg)] rng) rng rng) rng Private DefVal InlineNever ""
                     in Bind vdef (Bind bdef (Var v False rng) rng) rng
     in DefNonRec (Def (ValueBinder defName () expr rng rng) rng (dataInfoVis info) (DefFun [] (lazyFip info)) InlineNever "")
 
@@ -511,15 +511,15 @@ synLazyForce info
         defName  = lazyName info "force"
         dataTp   = typeApp (TCon (TypeCon (dataInfoName info) (dataInfoKind info))) (map TVar (dataInfoParams info))
         -- fullTp   = tForall (dataInfoParams info) [] (typeFun [(nameNil,dataTp)] typePure dataTp )
-        prefix s = (if (all (\conInfo -> not (null (conInfoParams conInfo))) (dataInfoConstrs info))
-                     then "kk-datatype-ptr-" else "kk-datatype-") ++ s
+        nameIsWhnf = if (all (\conInfo -> not (null (conInfoParams conInfo))) (dataInfoConstrs info))
+                       then nameLazyPtrIsWhnf else nameLazyIsWhnf
 
         argName   = newHiddenName "lazy"
         arg       = Var argName False rng
         expr      = Lam [ValueBinder argName Nothing Nothing rng rng] body xrng
         body      = Case tst [Branch (PatCon nameTrue [] rng rng) [Guard guardTrue arg]
                              ,Branch (PatCon nameFalse [] rng rng) [Guard guardTrue whnf]] False rng
-        tst       = App (Var (newName (prefix "is-whnf")) False rng) [(Nothing,arg),(Nothing,Var (lazyName info "lazy-tag") False rng)] rng
+        tst       = App (Var nameIsWhnf False rng) [(Nothing,arg),(Nothing,Var (lazyName info "lazy-tag") False rng)] rng
         whnf      = App (Var (lazyName info "whnf") False rng) [(Nothing,arg)] rng
     in DefNonRec (Def (ValueBinder defName () expr rng rng) rng (dataInfoVis info) (DefFun [] (lazyFip info)) InlineAlways "")
 

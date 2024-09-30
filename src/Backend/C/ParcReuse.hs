@@ -141,10 +141,10 @@ makeLets dgs expr = makeLet dgs expr
 ruExpr :: Expr -> Reuse Expr
 ruExpr expr
   = case expr of
-      App (Var name _) [Var tname _] | nameStem (getName name) == "lazy-whnf-target"
+      App (Var name _) [Var tname _] | getName name == nameLazyTarget
         -> do registerLazyCon tname
-              return (Lit (LitInt 0)) -- expr
-      App (Var name _) [Var tname _, conApp] | nameStem (getName name) == "lazy-update"
+              return exprUnit -- expr
+      App (Var name _) [Var tname _, conApp] | getName name == nameLazyUpdate
         -> ruLazyUpdate tname conApp
 
       App con@(Con cname repr) args
@@ -835,7 +835,7 @@ ruTrace msg
       trace ("Core.Reuse: " ++ show (map defName defs) ++ ": " ++ msg) $
         return ()
 
-ruError :: String -> Reuse a
+ruError :: HasCallStack => String -> Reuse a
 ruError msg
   = do defs <- getCurrentDef
        error ("Core.Reuse: " ++ show (map defName defs) ++ ": " ++ msg)

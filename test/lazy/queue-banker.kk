@@ -1,36 +1,4 @@
 import queue
-import std/core/undiv
-
-// internal: marker for lazy values that get matched to evaluate to whnf
-inline fip extern lazy-whnf-target(target : a) : ()
-  ""
-
-// internal: explicitly force update-in-place for lazy values
-fip extern lazy-update(target : a, x : a) : a
-  c inline "#1"
-
-// internal: test if a lazy value is in whnf
-inline fip extern kk-datatype-is-whnf(^x:a, lazy-tag:int32) : bool
-  c "kk_datatype_is_whnf"
-
-inline fip extern kk-datatype-ptr-is-whnf(^x:a, lazy-tag:int32) : bool
-  c "kk_datatype_ptr_is_whnf"
-
-inline fip extern kk-datatype-ptr-is-unique(^x:a) : bool
-  c "kk_datatype_ptr_is_unique"
-
-// internal: evaluate atomically (or return `false` if already evaluated)
-inline fip extern lazy-atomic-enter(^target : a, lazy-tag: int32 ) : bool
-  c "kk_lazy_atomic_enter"
-
-// internal: release an atomically evaluated value
-inline fip extern lazy-atomic-leave(target : a) : ()
-  c "kk_lazy_atomic_leave"
-
-// internal: is a lazy datatype thread shared?
-inline fip extern kk-datatype-ptr-is-thread-shared(^x : a) : bool
-  c "kk_datatype_ptr_is_thread_shared"
-
 
 lazy type stream<a>
   SNil
