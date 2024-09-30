@@ -35,7 +35,7 @@ pub infixr 20  (||)
 // prefix     (!), (-)
 
 
-// build: 145
+// build: 146
 
 // ----------------------------------------------------------------------------
 // Core types
@@ -197,6 +197,16 @@ pub value type maybe<a>
   con Nothing
   // A single result
   con Just( value : a )
+
+// The `:maybe2` type is used to represent either two values (`Just2(x,y)`) or `Nothing2`.
+// A type like `:maybe2<a,b>` can be used instead of `:maybe<(a,b)>` to avoid boxing and
+// heap allocating the tuple. See also `module std/core/maybe2`.
+pub value type maybe2<a,b>
+  // No result
+  con Nothing2
+  // A single result with two values
+  con Just2( fst : a, snd : b )
+
 
 // The choice type represents one of two possible types `:a` or `:b`.
 // See also `module std/core/either`.
