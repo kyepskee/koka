@@ -29,6 +29,7 @@ pub import std/core/string
 pub import std/core/sslice
 pub import std/core/list
 pub import std/core/maybe
+pub import std/core/maybe2
 pub import std/core/either
 pub import std/core/tuple
 pub import std/core/show
