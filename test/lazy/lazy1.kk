@@ -1,4 +1,5 @@
 import std/core/undiv
+import test/lazy/queue-banker
 
 type llist<a>
   LNil

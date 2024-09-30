@@ -3127,9 +3127,9 @@ dockeyword s
 
 docconid :: LexParser (Name,(Range,String))
 docconid
-  = ensureUnqualified "constructor" $
+  = -- ensureUnqualified "constructor" $
     (do (Lexeme rng (LexCons id doc)) <- parseLex (LexCons nameNil "")
-        return (id,(rng,doc))
+        return (requalifyLocally id,(rng,doc))
      <?> "constructor")
 
 

@@ -3,9 +3,9 @@ import queue
 lazy type stream<a>
   SNil
   SCons( head : a, tail : stream<a> )
-  lazy fbip SAppRev( pre : stream<a>, post : list<a> ) ->
+  lazy SAppRev( pre : stream<a>, post : list<a> ) ->
     match pre
-      SNil        -> sreverse(post)  // gives warning
+      SNil        -> sreverse(post)
       SCons(x,xx) -> SCons(x,SAppRev(xx,post))
 
 fip fun sreverse-acc( xs : list<a>, acc : stream<a> ) : stream<a>

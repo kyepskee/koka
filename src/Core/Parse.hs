@@ -222,7 +222,7 @@ typeDecl env
 
 conDecl tname foralls sort env
   = do (vis,mbLazy) <- try $ do vis <- vispub
-                                lazy <- option Nothing (do{ keyword "lazy"; fip <- parseTailFip; return (Just fip) })
+                                lazy <- option Nothing (do{ specialId "lazy"; fip <- parseTailFip; return (Just fip) })
                                 keyword "con"
                                 return (vis,lazy)
        (name,(_,doc)) <- docconid
