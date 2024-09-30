@@ -30,23 +30,23 @@ pub fun test1()
 /*
 // The following should be generated.
 // Note that `lazy/whnf-update(s,...)`` is always inserted at tail-position.
-// If the argument is not a syntactic non-lazy constructor a recursive call to `stream/eval` is added as well. (SNil case below)
+// If the argument is not a syntactic non-lazy constructor a recursive call to `stream/force` is added as well. (`SNil` case in `SAppRev` below)
+// (note: that makes `stream/eval` and `stream/force` mutually recursive and `div` will be inferred)
+//
 // If the argument is a singleton (`SNil`), larger, or unknown (`sreverse(post)`),
-// an indirection is automatically inserted (`SIndirect`). The latter two issue a warning.
+// an indirection is automatically inserted (`stream/Indirect`). Larger or unknown issue a warning.
 //
 // `lazy/whnf-update(s)` is compiled specially to only updates `s` if `s` is not unique.
 // It also always returns the final whnf, not a potential indirection (so we don't need to call `stream/eval` recursively afterwards)
 
-val stream/lazy-tag = 3   // always the indirection tag; anything >= 3 is considered a lazy constructor
-
 noinline fun stream/eval( s : stream<a> ) : _ stream<a>
   lazy/whnf-target(s)      // just for the compiler to reference count and reuse correctly
-  lazy match s
+  lazy match s             // lazy match so we can match on the lazy constructors (and no `stream/force` is inserted)
     SAppRev( pre, post )
       -> match stream/force(pre)
-           SNil        -> lazy/whnf-update(s,stream-eval(sreverse(post)))  // does this guarantee we never update an indirection with an indirection?
-           SCons(x,xx) -> lazy/whnf-update(s,SCons(x,SAppRev(xx,post)))
-    SIndirect(ind)
+           SNil        -> lazy/whnf-update(s,stream/force(sreverse(post)))  // does this guarantee we never update an indirection with an indirection?
+           SCons(x,xx) -> lazy/whnf-update(s,SCons(x,SAppRev(xx,post)))     // no recursive `stream/force` is inserted as we can statically see the `SCons`
+    stream/Indirect(ind)   // generated
       -> ind               // we don't use `stream/eval(ind)` as we guarantee `ind` is never an indirection itself (and always whnf)
     _ -> s
 
@@ -59,6 +59,8 @@ noinline fun stream/whnf( s : stream<a> ) : div stream<a>
     val v = stream/eval(s)                  // if entered first, we need to call `lazy/leave` later
     lazy/leave(s)                           // unblock any others waiting for the value
     v
+
+val stream/lazy-tag = 3   // always the indirection tag; anything >= 3 is considered a lazy constructor
 
 // `stream/force` is inserted at any `match` on a `:stream<a>` type. (but not for a `lazy match`).
 inline fun stream/force( s : stream<a> ) : div stream<a>
