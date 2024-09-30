@@ -29,7 +29,7 @@ pub fun default( m : maybe2<a,b>, nothing : (a,b) ) : (a,b)
 pub fun unjust2( m : maybe2<a,b> ) : exn (a,b)
   match m
     Just2(x,y) -> (x,y)
-    Nothing2   -> throw("unexpected Nothing in std/core/maybe/unjust")
+    Nothing2   -> throw("unexpected Nothing2 in std/core/maybe/unjust2")
 
 pub fun map( m : maybe2<a,b>, f : (a,b) -> e (c,d) ) : e maybe2<c,d>
   match m

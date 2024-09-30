@@ -28,41 +28,45 @@ pub fun test1()
   SAppRev(stream(1,3),[6,5,4]).list.println
 
 /*
-// this should be generated; `lazy-update(s,...)`` is always inserted at tail-position.
-// If the argument is not a syntactic non-lazy constructor a recursive call to `stream-eval` is added as well. (case `(A)`)
+// The following should be generated.
+// Note that `lazy/whnf-update(s,...)`` is always inserted at tail-position.
+// If the argument is not a syntactic non-lazy constructor a recursive call to `stream/eval` is added as well. (SNil case below)
 // If the argument is a singleton (`SNil`), larger, or unknown (`sreverse(post)`),
 // an indirection is automatically inserted (`SIndirect`). The latter two issue a warning.
-noinline fbip fun stream-eval( s : stream<a> ) : _ stream<a>
-  lazy-whnf-target(s)
+//
+// `lazy/whnf-update(s)` is compiled specially to only updates `s` if `s` is not unique.
+// It also always returns the final whnf, not a potential indirection (so we don't need to call `stream/eval` recursively afterwards)
+
+val stream/lazy-tag = 3   // always the indirection tag; anything >= 3 is considered a lazy constructor
+
+noinline fun stream/eval( s : stream<a> ) : _ stream<a>
+  lazy/whnf-target(s)      // just for the compiler to reference count and reuse correctly
   lazy match s
     SAppRev( pre, post )
-      -> lazy match stream-forcex(pre)
-           SNil        -> lazy-update(s,stream-eval(sreverse(post)))  // (A)
-           SNil        -> match post
-                            Cons(x,xx) -> lazy-update(s,SCons(x,sreverse(xx)))
-                            Nil        -> lazy-update(s,SNil)
-           SCons(x,xx) -> lazy-update(s,SCons(x,SAppRev(xx,post)))
-           _           -> lazy-update(s,SNil) // this cannot happen; todo: fix partial check
-    // generated
+      -> match stream/force(pre)
+           SNil        -> lazy/whnf-update(s,stream-eval(sreverse(post)))  // does this guarantee we never update an indirection with an indirection?
+           SCons(x,xx) -> lazy/whnf-update(s,SCons(x,SAppRev(xx,post)))
     SIndirect(ind)
-      -> ind // or stream-eval(ind) ?
+      -> ind               // we don't use `stream/eval(ind)` as we guarantee `ind` is never an indirection itself (and always whnf)
     _ -> s
 
-noinline fbip fun stream-whnf( s : stream<a> ) : div stream<a>
-  if kk-datatype-ptr-is-unique(s) || !lazy-atomic-enter(s,stream/lazy-tag) then
-    stream-eval(s)
+noinline fun stream/whnf( s : stream<a> ) : div stream<a>
+  if lazy/datatype-ptr-is-unique(s) ||      // we never need to blackhole a unique lazy value (?)
+     !lazy/enter(s,stream/lazy-tag)         // otherwise try to enter (maybe atomically and block waiting)
+  then
+    stream/eval(s)                          // we always eval (even if waiting) in order to resolve indirections
   else
-    val v = stream-eval(s)
-    lazy-atomic-leave(s)
+    val v = stream/eval(s)                  // if entered first, we need to call `lazy/leave` later
+    lazy/leave(s)                           // unblock any others waiting for the value
     v
 
-fbip fun stream-forcex( s : stream<a> ) : div stream<a>
-  // stream-eval(s)
-  if kk-datatype-is-whnf(s,stream/lazy-tag) then s else stream-whnf(s)
-
-inline fbip fun stream-force( s : stream<a> ) : div stream<a>
-  // stream-eval(s)
-  if kk-datatype-is-whnf(s,stream/lazy-tag) then s else stream-whnf(s)
+// `stream/force` is inserted at any `match` on a `:stream<a>` type. (but not for a `lazy match`).
+inline fun stream/force( s : stream<a> ) : div stream<a>
+  // `lazy/datatype-ptr-is-whnf` is fast as it just does `s->tag < stream/lazy-tag` (so we want to inline this)
+  // (if a type can have singletons, it becomes `lazy/datatype-is-whnf(s)` == `is-value(s) || s->tag < stream/lazy-tag`)
+  if lazy/datatype-ptr-is-whnf(s,stream/lazy-tag)
+    then s
+    else stream-whnf(s)
 */
 
 
