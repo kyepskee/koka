@@ -99,4 +99,4 @@ fbip(2) fun uncons( Bqueue(front,front-len,rear,rear-len) : bqueue<a> ) : div ma
     SNil        -> Nothing2
 
 pub fun main()
-  benchmain(Queue(bankers/empty, snoc, uncons))
+  benchmain(QueueI(bankers/empty, snoc, uncons))
