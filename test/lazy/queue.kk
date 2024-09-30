@@ -49,7 +49,7 @@ pub fun bench( ops : int, n : int, qi : queue<q> ) : pure int
   val q = bench-snoc( ops, n, qi, rnd-init(42,43), qi.empty)
   bench-unconsn( ops, n, q, qi )
 
-pub fun benchmain( qi : queue<q>, ops : int = 1000000) : io ()
+pub fun benchmain( qi : queue<q>, ops : int = 5000000) : io ()
   val n = get-args().head("").parse-int.default(1)
   // val ops = 10000000
   val sum = bench(ops / (n + 1), n, qi)
