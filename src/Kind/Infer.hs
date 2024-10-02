@@ -621,7 +621,11 @@ infTypeDefs isRec tdefs0
        let (ctdefs,lazyExprss) = unzip ctdefs'
        return (Core.TypeDefGroup ctdefs, concat lazyExprss)
     where
-      getDataEffect (tbind, DataType{ typeDefEffect = deff }) = [(tbinderName tbind, deff)]
+      getDataEffect (tbind, DataType{ typeDefEffect = DataNoEffect })
+          | isInfKindHandled (tbinderKind tbind) -- todo: add (n)handled(1) kind constructors?
+          = [(tbinderName tbind, DataEffect False False)] -- for user declared `type eff :: HX`  `test/algeff/wrong/eff-rec5`
+      getDataEffect (tbind, DataType{ typeDefEffect = deff })
+          = [(tbinderName tbind, deff)]
       getDataEffect _ = []
 
 checkRecursion :: [TypeDef UserType UserType UserKind] -> KInfer ()
