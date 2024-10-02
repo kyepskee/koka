@@ -1,4 +1,9 @@
-import queue
+// Bankers queue  (see "Purely Functional Data Structures" by Chris Okasaki, Sect. 6.3.2)
+// - worst-case  O(n), persistent O(n)
+// - amortized   O(1), persistent O(1)
+module queue/bankers
+
+import bench
 
 lazy type stream<a>
   SNil
@@ -8,6 +13,7 @@ lazy type stream<a>
       SNil        -> sreverse(post)
       SCons(x,xx) -> SCons(x,SAppRev(xx,post))
 
+
 fip fun sreverse-acc( xs : list<a>, acc : stream<a> ) : stream<a>
   match xs
     Cons(x,xx) -> sreverse-acc(xx, SCons(x,acc))
@@ -16,7 +22,8 @@ fip fun sreverse-acc( xs : list<a>, acc : stream<a> ) : stream<a>
 fip fun sreverse( xs : list<a> ) : stream<a>
   sreverse-acc(xs,SNil)
 
-pub fbip fun stream/list( s : stream<a> ) : div list<a>
+
+pub fbip fun list( s : stream<a> ) : div list<a>
   match s
     SCons(x,xx) -> Cons(x,xx.list)
     SNil -> Nil
@@ -70,7 +77,6 @@ inline fun stream/force( s : stream<a> ) : div stream<a>
     then s
     else stream-whnf(s)
 */
-
 
 struct bqueue<a>
   front : stream<a>
