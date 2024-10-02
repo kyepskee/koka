@@ -38,7 +38,7 @@ pub fun tail( xs : list<a> ) : list<a>
     _          -> []
 
 // Is the list empty?
-pub fun is-empty( xs : list<a> ) : bool
+pub fip fun is-empty( ^xs : list<a> ) : bool
   match xs
     Nil -> True
     _   -> False
@@ -231,24 +231,25 @@ pub fun map-indexed-peek(xs : list<a>, f : (idx : int, value : a, rest : list<a>
   mapidx(xs,0)
 
 // Reverse a list.
-pub fun reverse(xs : list<a>) : list<a>
+pub fip fun reverse(xs : list<a>) : list<a>
   reverse-append( xs, Nil )
 
 // Efficiently reverse a list `xs` and append it to `tl`:
 // `reverse-append(xs,tl) == reserve(xs) ++ tl
-pub fun reverse-append( xs : list<a>, tl : list<a> ) : list<a>
-  fun reverse-acc(acc : list<a>, ys : list<a> ) : list<a>
+pub fip fun reverse-append( xs : list<a>, tl : list<a> ) : list<a>
+  reverse-acc(tl,xs)
+
+fip fun reverse-acc(acc : list<a>, ys : list<a> ) : list<a>
     match ys
       Cons(x,xx) -> reverse-acc(Cons(x,acc),xx)
       _          -> acc
-  reverse-acc(tl,xs)
 
 // Append two lists.
-pub fun (++)(xs : list<a>, ys : list<a> ) : list<a>
+pub fip fun (++)(xs : list<a>, ys : list<a> ) : list<a>
   append(xs,ys)
 
 // Append two lists.
-pub fun append(xs : list<a>, ys : list<a> ) : list<a>
+pub fip fun append(xs : list<a>, ys : list<a> ) : list<a>
   match xs
     Cons(x,xx) -> Cons(x,append(xx,ys))
     Nil -> ys
