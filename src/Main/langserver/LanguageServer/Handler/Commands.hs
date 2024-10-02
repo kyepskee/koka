@@ -35,7 +35,7 @@ import LanguageServer.Monad
 import LanguageServer.Conversions( filePathToUri )
 import LanguageServer.Handler.TextDocument (rebuildUri)
 
-import Compile.Options (Flags (outFinalPath), targets, commandLineHelp, updateFlagsFromArgs)
+import Compile.Options (Flags (outFinalPath), targets, commandLineHelp, processExtraOptions)
 
 
 
@@ -46,20 +46,19 @@ commandHandler = requestHandler J.SMethod_WorkspaceExecuteCommand $ \req resp ->
   let parameterError = do
         sendNotification J.SMethod_WindowLogMessage $ J.LogMessageParams J.MessageType_Error $ T.pack "Invalid parameters for " <> command
         resp $ Right $ J.InR J.Null
-  flags <- getFlags
   if command == "koka/compile" then
     case commandParams of
       -- koka/compile filePath "...args to parse"
       Just [Json.String filePath, Json.String additionalArgs] -> do
         -- Update the flags with the specified arguments
-        newFlags <- getNewFlags flags additionalArgs
+        newFlags <- getNewFlags additionalArgs
         -- Recompile the file, but with executable target
         withProgress (T.pack "Compiling " <> filePath) Nothing J.Cancellable $ \report -> do
           setProgress (Just report)
           res <- -- trace ("koka/compile: " ++ T.unpack filePath ++ ", " ++ show (filePathToUri (T.unpack filePath))) $
                  rebuildUri (Just newFlags) (Just (newName "main")) (J.toNormalizedUri (filePathToUri (T.unpack filePath)))
           emitInfo $ \penv -> case res of
-            Just file -> text "Finished generating code for main file" <+> color DarkGreen (text (T.unpack filePath)) 
+            Just file -> text "Finished generating code for main file" <+> color DarkGreen (text (T.unpack filePath))
                             <--> text "Executable:" <+> color DarkGreen (text file)
             Nothing -> color Red $ text "Compilation Failed"
           setProgress Nothing
@@ -71,7 +70,7 @@ commandHandler = requestHandler J.SMethod_WorkspaceExecuteCommand $ \req resp ->
       -- The `filePath` where a top level function is defined by the name `functionName`, and any additional flags
       Just [Json.String filePath, Json.String functionName, Json.String additionalArgs] -> do
         -- Update the flags with the specified arguments
-        newFlags <- getNewFlags flags additionalArgs
+        newFlags <- getNewFlags additionalArgs
         -- Compile the expression, but with the interpret target
         withProgress (T.pack "Compiling " <> functionName) Nothing J.Cancellable $ \report -> do
           setProgress (Just report)
@@ -79,7 +78,7 @@ commandHandler = requestHandler J.SMethod_WorkspaceExecuteCommand $ \req resp ->
           res <- rebuildUri (Just newFlags) (Just (newName (T.unpack functionName)))
                             (J.toNormalizedUri (filePathToUri (T.unpack filePath)))
           emitInfo $ \penv -> case res of
-            Just file -> text "Finished generating code for function" <+> color DarkRed (text (T.unpack functionName)) 
+            Just file -> text "Finished generating code for function" <+> color DarkRed (text (T.unpack functionName))
                             <+> text "in" <+> color DarkGreen (text (T.unpack filePath))
                             <--> text "Executable:" <+> color DarkGreen (text file)
             Nothing -> color Red $ text "Compilation Failed"
@@ -99,13 +98,14 @@ commandHandler = requestHandler J.SMethod_WorkspaceExecuteCommand $ \req resp ->
       sendNotification J.SMethod_WindowLogMessage $ J.LogMessageParams J.MessageType_Error $ T.pack ("Unknown command: " ++ show req)
       resp $ Right $ J.InR J.Null
 
-getNewFlags :: Flags -> T.Text -> LSM Flags
-getNewFlags flags args = do
+getNewFlags :: T.Text -> LSM Flags
+getNewFlags args = do
   term <- getTerminal
-  case updateFlagsFromArgs flags (T.unpack args) of
-    Just flags' -> return flags'
-    Nothing -> do
+  flags <- getFlags
+  case processExtraOptions flags (T.unpack args) of
+    Right (flags',mode) -> return flags'
+    Left err -> do
       doc <- liftIO (commandLineHelp flags)
-      emitNotification $  \penv -> text "Invalid arguments:" <+> text (T.unpack args)
+      emitNotification $  \penv -> text "Invalid arguments:" <+> text (T.unpack args) <//> text err
       emitInfo $ \penv -> doc
       return flags

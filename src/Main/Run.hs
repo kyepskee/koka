@@ -64,7 +64,7 @@ plainLS p flags files
 -- Parse the arguments given a potential language server
 runWithLSArgs :: (ColorPrinter -> Flags -> [FilePath] -> IO ()) -> String -> IO ()
 runWithLSArgs runLanguageServer args
-  = do (flags,flags0,mode) <- getOptions args
+  = do (flags,mode) <- getOptions args
        let with = if (not (null (redirectOutput flags)))
                    then withFileNoColorPrinter (redirectOutput flags)
                    else if (console flags == "html")
@@ -72,7 +72,7 @@ runWithLSArgs runLanguageServer args
                    else if (console flags == "ansi")
                     then withColorPrinter
                     else withNoColorPrinter (if (languageServerStdio flags) then stderr else stdout)
-       with (mainMode runLanguageServer flags flags0 mode)
+       with (mainMode runLanguageServer flags mode)
     `catchIO` \err ->
     do if ("ExitFailure" `isPrefix` err)
         then return ()
@@ -82,8 +82,8 @@ runWithLSArgs runLanguageServer args
     isPrefix s t  = (s == take (length s) t)
 
 -- The main mode determines what the compiler should be doing
-mainMode :: (ColorPrinter -> Flags -> [FilePath] -> IO ()) -> Flags -> Flags -> Mode -> ColorPrinter -> IO ()
-mainMode runLanguageServer flags flags0 mode p
+mainMode :: (ColorPrinter -> Flags -> [FilePath] -> IO ()) -> Flags -> Mode -> ColorPrinter -> IO ()
+mainMode runLanguageServer flags mode p
   = case mode of
      ModeHelp
       -> showHelp flags p
@@ -95,7 +95,7 @@ mainMode runLanguageServer flags flags0 mode p
               do hPutStrLn stderr ("Failed to compile " ++ concat (intersperse "," files))
                  exitFailure
      ModeInteractive files
-      -> interpret p flags flags0 files
+      -> interpret p flags files
      ModeLanguageServer files
       -> runLanguageServer p flags files
 

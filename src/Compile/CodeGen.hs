@@ -379,6 +379,8 @@ codeGenLinkC term flags sequential cc progName imported outBase clibs
                                 color (colorSource (colorScheme flags)) (text (normalizeWith pathSep mainTarget))
         let cmdflags = if (showElapsed flags) then " --kktime" else ""
 
+        -- termInfo term $ text "flags:" <+> text (show flags) <+> text "\n"
+
         case target flags of
           C Wasm
             -> do let cmd = wasmrun flags ++ " " ++ dquote mainTarget ++ " -- " ++ cmdflags ++ " " ++ execOpts flags

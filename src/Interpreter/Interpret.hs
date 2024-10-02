@@ -57,8 +57,7 @@ import Compile.BuildContext (buildcEmpty)
 ---------------------------------------------------------------}
 data State = State{  printer    :: !ColorPrinter
                    -- system variables
-                   , flags      :: !Flags                -- processed flags
-                   , flags0     :: !Flags                -- unprocessed flags
+                   , flags      :: !Flags                -- flags
                    , evalDisable   :: !Bool
                    -- program state
                    , defines       :: ![(Name,[String])] -- interactive definitions
@@ -71,10 +70,10 @@ data State = State{  printer    :: !ColorPrinter
 {---------------------------------------------------------------
   Main
 ---------------------------------------------------------------}
-interpret ::  ColorPrinter -> Flags -> Flags -> [FilePath] -> IO ()
-interpret printer flags0 flagspre files
+interpret ::  ColorPrinter -> Flags -> [FilePath] -> IO ()
+interpret printer flags0 files
   = withReadLine (buildDir flags0) $
-    do{ let st0 = (State printer flags0 flagspre False [] Nothing [] nameNil)
+    do{ let st0 = (State printer flags0 False [] Nothing [] nameNil)
       ; messageHeader st0
       ; let coreSt = st0
       ; (buildc,erng) <- loadModules coreSt{flags = flags0{showCore=False}} (buildcEmpty flags0) [show (nameSystemCore)] False False
@@ -208,24 +207,29 @@ command st buildc cmd
                    ; next st buildc
                    }
 
-  Options opts-> do{ (newFlags,newFlags0,mode) <- processOptions (flags0 st) (words opts)
-                   ; let setFlags files
-                          = do if (null files)
-                                 then messageLn st ""
-                                 else messageError st "(ignoring file arguments)"
-                               (mbBuildc,_) <- B.runBuildIO (terminal st) newFlags False (B.buildcValidate False [] buildc)
-                               nextClear (st{ flags = newFlags, flags0 = newFlags0 }) (maybe buildc id mbBuildc)
-                   ; case mode of
-                       ModeHelp     -> do doc <- commandLineHelp (flags st)
-                                          messagePrettyLn st doc
-                                          next st buildc
-                       ModeVersion  -> do showVersion (flags st) (printer st)
-                                          messageLn st ""
-                                          nextClear st buildc
-                       ModeCompiler files     -> setFlags files
-                       ModeInteractive files  -> setFlags files
-                       -- ModeDoc files          -> setFlags files
-                   }
+  Options opts-> do{ let mbNew = processExtraOptions (flags st) opts
+                   ; case mbNew of
+                       Left err -> do messageError st ("invalid arguments:\n" ++ err)
+                                      next st buildc
+                       Right (newFlags,mode)
+                        -> do{ let setFlags files
+                                      = do if (null files)
+                                              then messageLn st ""
+                                              else messageError st "(ignoring file arguments)"
+                                           (mbBuildc,_) <- B.runBuildIO (terminal st) newFlags False (B.buildcValidate False [] buildc)
+                                           nextClear (st{ flags = newFlags }) (maybe buildc id mbBuildc)
+                              ; case mode of
+                                  ModeHelp     -> do doc <- commandLineHelp (flags st)
+                                                     messagePrettyLn st doc
+                                                     next st buildc
+                                  ModeVersion  -> do showVersion (flags st) (printer st)
+                                                     messageLn st ""
+                                                     nextClear st buildc
+                                  ModeCompiler files     -> setFlags files
+                                  ModeInteractive files  -> setFlags files
+                                  -- ModeDoc files          -> setFlags files
+                              }
+                    }
 
   Error err   -> do{ messageInfoLn st err
                    ; messageInfoLn st "invalid command."

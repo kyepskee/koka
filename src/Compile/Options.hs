@@ -18,7 +18,7 @@ module Compile.Options( -- * Command line options
                        , colorSchemeFromFlags
                        , prettyIncludePath
                        , isValueFromFlags
-                       , updateFlagsFromArgs
+                       , processExtraOptions
                        , CC(..), BuildType(..), ccFlagsBuildFromFlags
                        , buildType, unquote
                        , outName, fullBuildDir, buildVariant, buildLibVariant
@@ -214,6 +214,7 @@ data Flags
          , maxConcurrency   :: !Int
          , maxErrors        :: !Int
          , useBuildDirHash  :: !Bool
+         , baseFlags        :: Maybe Flags
          } deriving (Eq,Show)
 
 instance Hashable Flags where
@@ -362,6 +363,7 @@ flagsNull
           16    -- max concurrency
           25    -- max errors
           True  -- use variant hash
+          Nothing -- no base flags
 
 isHelp Help = True
 isHelp _    = False
@@ -716,43 +718,77 @@ optionCompletions
 {--------------------------------------------------------------------------
   Process options
 --------------------------------------------------------------------------}
-getOptions :: String -> IO (Flags,Flags,Mode)
+getOptions :: String -> IO (Flags,Mode)
 getOptions extra
   = do env  <- getEnvOptions
        args <- getArgs
        processOptions flagsNull (env ++ words extra ++ args)
 
-updateFlagsFromArgs :: Flags -> String -> Maybe Flags
-updateFlagsFromArgs flags0 args =
-  let
-    (preOpts,postOpts) = span (/="--") (words args)
-    flags1 = case postOpts of
-                   [] -> flags0
-                   (_:rest) -> flags0{ execOpts = concat (map (++" ") rest) }
-    (options,files,errs0) = getOpt Permute optionsAll preOpts
-    errs = errs0 ++ extractErrors options
-    in if (null errs)
-        then Just $ extractFlags flags1 options else Nothing
+processExtraOptions :: Flags -> String -> Either String (Flags,Mode)
+processExtraOptions flags0 args
+  = let defaultFlags  = case baseFlags flags0 of
+                          Just f  -> f
+                          Nothing -> flags0
+    in case parseOptions defaultFlags (words args) of
+        Left err -> Left err
+        Right (flags1,mode) -> Right (processDerivedOptions defaultFlags flags1, mode)
 
-processOptions :: Flags -> [String] -> IO (Flags,Flags,Mode)
+
+
+processOptions :: Flags -> [String] -> IO (Flags,Mode)
 processOptions flags0 opts
-  = let (preOpts,postOpts) = span (/="--") opts
-        flags1 = case postOpts of
-                   [] -> flags0
-                   (_:rest) -> flags0{ execOpts = concat (map (++" ") rest) }
-        (options,files,errs0) = getOpt Permute optionsAll preOpts
-        errs = errs0 ++ extractErrors options
-    in if (null errs)
-        then let flags2 = extractFlags flags1 options
-                 mode = if (any isHelp options) then ModeHelp
-                        else if (any isVersion options) then ModeVersion
-                        else if (any isInteractive options) then ModeInteractive files
-                        else if (any isLanguageServer options) then ModeLanguageServer files
-                        else if (null files) then ModeInteractive files
-                                             else ModeCompiler files
-                 flags = case mode of
-                           ModeInteractive _ -> flags2{evaluate = True}
-                           _                 -> flags2
+  = do (flags1,mode) <- processInitialOptions flags0 opts
+       return (processDerivedOptions flags1 flags1,mode)
+
+processDerivedOptions :: Flags -> Flags -> Flags
+processDerivedOptions defaultFlags flags
+  = let stdAlloc = if asan flags then True else useStdAlloc flags   -- asan implies useStdAlloc
+        cdefs    = ccompDefs flags
+                    ++ (if stdAlloc then [] else [("KK_MIMALLOC",show (sizePtr (platform flags)))])
+                    ++ (if (buildType flags > DebugFull) then [] else [("KK_DEBUG_FULL","")])
+                    ++ (if optctailCtxPath flags then [] else [("KK_CTAIL_NO_CONTEXT_PATH","")])
+                    ++ (if platformHasCompressedFields (platform flags) then [("KK_INTB_SIZE",show (sizeField (platform flags)))] else [])
+                    ++ (if not stdAlloc && mimallocStats flags then [("MI_STAT","2")] else [])
+
+        triplet   = if (not (null (vcpkgTriplet flags))) then vcpkgTriplet flags
+                      else if (isTargetWasm (target flags))
+                        then ("wasm" ++ show (8*sizePtr (platform flags)) ++ "-emscripten")
+                        else tripletArch ++
+                              (if onWindows
+                                  then (if (ccName (ccomp flags) `startsWith` "mingw")
+                                          then "-mingw-static"
+                                          else "-windows-static-md")
+                                  else ("-" ++ tripletOsName))
+
+    in  flags{  outBaseName = if null (outBaseName flags) && not (null (outFinalPath flags))
+                                then basename (outFinalPath flags)
+                                else outBaseName flags,
+                optSpecialize  = if (optimize flags <= 0) then False
+                                  else (optSpecialize flags),
+                optInlineMax   = if (optimize flags < 0)
+                                    then 0
+                                    else if (optimize flags <= 1)
+                                      then (optInlineMax flags) `div` 3
+                                      else (optInlineMax flags),
+                optctailCtxPath = (optctailCtxPath flags && isTargetC (target flags)),
+                optUnroll   = if (optUnroll flags < 0)
+                                then (if (optimize flags > 0) then 1 else 0)
+                                else optUnroll flags,
+                useStdAlloc = stdAlloc,
+                vcpkgTriplet= triplet,
+                ccompDefs   = cdefs,
+                baseFlags   = Just defaultFlags
+              }
+
+processInitialOptions :: Flags -> [String] -> IO (Flags,Mode)
+processInitialOptions flags0 opts
+  = case parseOptions flags0 opts of
+      Left err -> invokeError [err]
+      Right (flags1,mode)
+        ->   let flags = case mode of
+                           ModeInteractive _    -> flags1{evaluate = True }
+                           ModeLanguageServer _ -> flags1{genRangeMap = True }
+                           _                    -> flags1
              in do buildDir <- getKokaBuildDir (buildDir flags) (evaluate flags)
                    buildTag <- if (null (buildTag flags)) then getDefaultBuildTag else return (buildTag flags)
                    ed   <- if (null (editor flags))
@@ -771,79 +807,41 @@ processOptions flags0 opts
                            else return (ccompPath flags)
                    (cc,asan) <- ccFromPath flags ccmd
                    ccCheckExist cc
-                   let stdAlloc = if asan then True else useStdAlloc flags   -- asan implies useStdAlloc
-                       cdefs    = ccompDefs flags
-                                   ++ (if stdAlloc then [] else [("KK_MIMALLOC",show (sizePtr (platform flags)))])
-                                   ++ (if (buildType flags > DebugFull) then [] else [("KK_DEBUG_FULL","")])
-                                   ++ (if optctailCtxPath flags then [] else [("KK_CTAIL_NO_CONTEXT_PATH","")])
-                                   ++ (if platformHasCompressedFields (platform flags) then [("KK_INTB_SIZE",show (sizeField (platform flags)))] else [])
-                                   ++ (if not stdAlloc && mimallocStats flags then [("MI_STAT","2")] else [])
 
-                   -- vcpkg
-                   -- (vcpkgRoot,vcpkg) <- vcpkgFindRoot (vcpkgRoot flags)
-                   let triplet          = if (not (null (vcpkgTriplet flags))) then vcpkgTriplet flags
-                                            else if (isTargetWasm (target flags))
-                                              then ("wasm" ++ show (8*sizePtr (platform flags)) ++ "-emscripten")
-                                              else tripletArch ++
-                                                    (if onWindows
-                                                        then (if (ccName cc `startsWith` "mingw")
-                                                                then "-mingw-static"
-                                                                else "-windows-static-md")
-                                                        else ("-" ++ tripletOsName))
-                       {-
-                       vcpkgInstalled   = (vcpkgRoot) ++ "/installed/" ++ triplet
-                       vcpkgIncludeDir  = vcpkgInstalled ++ "/include"
-                       vcpkgLibDir      = vcpkgInstalled ++ (if buildType flags <= Debug then "/debug/lib" else "/lib")
-                       vcpkgLibDirs     = if (null vcpkg) then [] else [vcpkgLibDir]
-                       vcpkgIncludeDirs = if (null vcpkg) then [] else [vcpkgIncludeDir]
-                       -}
-                   return (flags{ packages    = pkgs,
-                                  buildDir    = buildDir,
-                                  buildTag    = buildTag,
-                                  localBinDir = localBinDir,
-                                  localDir    = localDir,
-                                  localLibDir = localLibDir,
-                                  localShareDir = localShareDir,
+                   let flagsx  = flags{ packages    = pkgs,
+                                        buildDir    = buildDir,
+                                        buildTag    = buildTag,
+                                        localBinDir = localBinDir,
+                                        localDir    = localDir,
+                                        localLibDir = localLibDir,
+                                        localShareDir = localShareDir,
+                                        ccompPath   = ccmd,
+                                        ccomp       = cc,
+                                        asan        = asan,
+                                        editor      = ed,
+                                        includePath = normalizedIncludes,
+                                        genRangeMap = outHtml flags > 0 || genRangeMap flags
+                                    }
+                   return (flagsx,mode)
 
-                                  outBaseName = if null (outBaseName flags) && not (null (outFinalPath flags))
-                                                  then basename (outFinalPath flags)
-                                                  else outBaseName flags,
+parseOptions :: Flags -> [String] -> Either String (Flags,Mode)
+parseOptions flags0 opts
+  = let (preOpts,postOpts) = span (/="--") opts
+        flags1 = case postOpts of
+                   [] -> flags0
+                   (_:rest) -> flags0{ execOpts = concat (map (++" ") rest) }
+        (options,files,errs0) = getOpt Permute optionsAll preOpts
+        errs = errs0 ++ extractErrors options
+    in if null errs
+         then let mode = if (any isHelp options) then ModeHelp
+                          else if (any isVersion options) then ModeVersion
+                          else if (any isInteractive options) then ModeInteractive files
+                          else if (any isLanguageServer options) then ModeLanguageServer files
+                          else if (null files) then ModeInteractive files
+                                              else ModeCompiler files
+              in Right (extractFlags flags1 options,mode)
+         else Left (concat errs)
 
-                                  optSpecialize  = if (optimize flags <= 0) then False
-                                                    else (optSpecialize flags),
-                                  optInlineMax   = if (optimize flags < 0)
-                                                     then 0
-                                                     else if (optimize flags <= 1)
-                                                       then (optInlineMax flags) `div` 3
-                                                       else (optInlineMax flags),
-                                  optctailCtxPath = (optctailCtxPath flags && isTargetC (target flags)),
-                                  optUnroll   = if (optUnroll flags < 0)
-                                                  then (if (optimize flags > 0) then 1 else 0)
-                                                  else optUnroll flags,
-                                  ccompPath   = ccmd,
-                                  ccomp       = cc,
-                                  ccompDefs   = cdefs,
-                                  asan        = asan,
-                                  useStdAlloc = stdAlloc,
-                                  editor      = ed,
-                                  includePath = normalizedIncludes,
-                                  genRangeMap = outHtml flags > 0 || any isLanguageServer options,
-                                  vcpkgTriplet= triplet
-
-
-
-                                  {-
-                                  vcpkgRoot   = vcpkgRoot,
-                                  vcpkg       = vcpkg,
-                                  vcpkgTriplet= triplet,
-                                  vcpkgIncludeDir  = vcpkgIncludeDir,
-                                  vcpkgLibDir      = vcpkgLibDir
-                                  -}
-                                  -- ccompLibDirs     = vcpkgLibDirs ++ ccompLibDirs flags
-                                  -- ccompIncludeDirs = vcpkgIncludeDirs ++ ccompIncludeDirs flags  -- include path added when a library is used
-                               }
-                          ,flags,mode)
-        else invokeError errs
 
 getKokaBuildDir :: FilePath -> Bool -> IO FilePath
 getKokaBuildDir "" eval
