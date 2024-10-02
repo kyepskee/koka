@@ -516,7 +516,7 @@ inferBindDef def@(Def (ValueBinder name () expr nameRng vrng) rng vis sort inl d
                        then return (Core.Def name stp coreExpr vis sort inl nameRng doc)
                        else do hp <- Op.freshTVar kindHeap Meta
                                (qrefName,_,info) <- resolveName nameRef Nothing rng
-                               let refTp  = typeApp typeRef [hp,tp]
+                               let refTp  = typeApp typeRef [hp,stp]
                                    refVar = coreExprFromNameInfo qrefName info
                                    refExpr = Core.App (Core.TypeApp refVar [hp,stp]) [coreExpr] -- TODO: fragile: depends on order of quantifiers of the ref function!
                                -- traceDoc $ \penv -> text "reference" <+> pretty name <.> colon <+> ppType penv stp
@@ -532,7 +532,7 @@ inferBindDef def@(Def (ValueBinder name () expr nameRng vrng) rng vis sort inl d
                      case (ls,tl) of
                        ([],tl) | isTypeTotal tl -> unusedWarning rng
                        ([],TVar tv)
-                         -> do occ <- occursInContext tv (ftv tp)
+                         -> do occ <- occursInContext tv (ftv stp)
                                if (not occ) then unusedWarning rng else return ()
                                -- return ()
                        _ -> return ()
@@ -581,7 +581,7 @@ inferExpr :: HasCallStack => Maybe (Type,Range) -> Expect -> Expr Type -> Inf (T
 inferExpr propagated expect (Lam bindersL body0 rng)
   = isNamedLam $ \isNamed ->
     disallowHole $
-    do -- traceDoc $ \env -> text "inferExpr.Lam:" <+> pretty (show expect) <+> text ", propagated:" <+> ppProp env propagated
+    do -- traceDoc $ \env -> text "inferExpr.Lam:" <+> pretty (map binderName bindersL) <+> pretty (show expect) <+> text ", propagated:" <+> ppProp env propagated
        (bindersX,unpackImplicitss) <- unzip <$> mapM inferImplicitParam bindersL
        let body = foldr (\f x -> f x) body0 unpackImplicitss
 
@@ -1626,7 +1626,7 @@ inferVarName propagated expect name rng isRhs (qname,tp,info)
                           return (tp,eff,fcore mod rng)
                   Nothing
                     -> do let coreVar = coreExprFromNameInfo qname info
-                          -- traceDoc $ \env -> text "inferVar:" <+> pretty name <+> text ":" <+> text (show info) <.> text ":" <+> ppType env tp
+                          -- traceDoc $ \env -> text "inferVar:" <+> pretty name <+> text ":" {- <+> text (show info) <.> text ":" -} <+> ppType env{showIds=True} tp
                           (itp,coref) <- maybeInstantiate rng expect tp
                           sitp <- subst itp
                           addRangeInfo rng (RM.Id (infoCanonicalName qname info) (RM.NIValue (infoSort info) sitp (infoDocString info) False) [] False)
@@ -2381,15 +2381,15 @@ maybeInstantiateOrGeneralize contextRange range eff expect tp core
 
 -- | Try to match the propagated type with a function type,
 -- returning the propagated argument, effect, and result type, and the expected instantiation of the result
-matchFun :: Int -> Maybe (Type,Range) -> Inf ([Maybe (Name,Type)],Maybe (Type,Range), Maybe (Type,Range), [TypeVar], Expect)
+matchFun :: HasCallStack => Int -> Maybe (Type,Range) -> Inf ([Maybe (Name,Type)],Maybe (Type,Range), Maybe (Type,Range), [TypeVar], Expect)
 matchFun nArgs mbType
   = case mbType of
       Nothing       -> return (replicate nArgs Nothing,Nothing,Nothing,[],Instantiated)
       Just (tp,rng) -> do -- (rho,_,_) <- instantiate rng tp
                           -- let skolems = []
-                          -- traceDoc $ \penv -> text "matchFun: " <+> ppType penv{showKinds=True,showIds=True} tp
+                          -- traceDoc $ \penv -> text "matchFun: " <+> ppType penv{showKinds=True,showIds=True} tp <+> text "at" <+> pretty rng
                           (skolems,_,rho,_) <- Op.skolemizeEx rng tp
-                          -- traceDoc $ \penv -> text " skolemized: " <+> ppType penv rho
+                          -- traceDoc $ \penv -> text "skolemized: " <+> ppType penv rho
                           -- let sub = subNew [(tv,TVar (tv{typevarFlavour=Meta})) | tv <- skolems]
                           case splitFunType rho of
                            Nothing

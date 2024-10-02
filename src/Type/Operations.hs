@@ -20,6 +20,7 @@ module Type.Operations( instantiate
                       ) where
 
 
+import Debug.Trace
 import Common.Range
 import Common.Unique
 import Common.Failure
@@ -119,7 +120,9 @@ skolemize range tp
 -- | Skolemize a type and return the instantiated quantifiers, name/predicate pairs for evidence,
 -- the instantiated type, and a core transformer function (which applies type arguments and evidence)
 skolemizeEx :: (HasCallStack,HasUnique m) => Range -> Type -> m ([TypeVar],[Evidence],Rho,Core.Expr -> Core.Expr)
-skolemizeEx = instantiateExFl Skolem
+skolemizeEx rng tp
+  = -- trace ("skolemizeEx: " ++ show tp) $
+    instantiateExFl Skolem rng tp
 
 
 -- | General instantiation for skolemize and instantiate
@@ -128,14 +131,14 @@ instantiateExFl flavour range tp
   = case splitPredType tp of
       ([],[],rho) -> return ([],[],rho,id)
       (vars,preds,rho)
-        ->  do (tvars,sub) <- freshSubX TVar flavour vars
+        ->  do (tvars,sub) <- freshSubX TVar flavour vars (alltv rho)
                let srho   = sub |-> rho
                    spreds = sub |-> preds
                pnames <- mapM predName spreds
                let corevars = map (\name -> Core.Var name InfoNone) pnames
                    evidence = [Ev name pred range | (name,pred) <- zip pnames spreds]
-               return (tvars, evidence, srho
-                      ,(if null corevars then id else id {- Core.addApps corevars -}) . Core.addTypeApps tvars)
+               return $!(tvars, evidence, srho
+                         , (if null corevars then id else id {- Core.addApps corevars -}) . Core.addTypeApps tvars)
 
 
 predName :: HasUnique m => Pred -> m Core.TName
@@ -153,11 +156,20 @@ freshSub flavour vars
        return (tvars,sub)
 
 
-freshSubX :: HasUnique m => (TypeVar -> Type) -> Flavour -> [TypeVar] -> m ([TypeVar],Sub)
-freshSubX makeType flavour vars
-  = do tvars <- mapM (\tv -> freshTypeVar (typevarKind tv) flavour) vars
+freshSubX :: HasUnique m => (TypeVar -> Type) -> Flavour -> [TypeVar] -> Tvs -> m ([TypeVar],Sub)
+freshSubX makeType flavour vars exclude
+  = -- trace ("freshSubX: " ++ show vars) $
+    do tvars <- mapM (\tv -> freshTypeVarX (typevarKind tv) flavour exclude) vars
        let sub = subNew (zip vars (map makeType tvars))
        return (tvars,sub)
+
+-- ensure we don't use a fresh type variable that already occurs in the type
+freshTypeVarX :: HasUnique m => Kind -> Flavour -> Tvs -> m TypeVar
+freshTypeVarX kind flavour exclude
+  = do tvar <- freshTypeVar kind flavour
+       if (tvsMember tvar exclude)
+         then freshTypeVarX kind flavour exclude
+         else return tvar
 
 {-
 -- | Instantiate the the "some" quantifiers of an annotation to fresh type variables

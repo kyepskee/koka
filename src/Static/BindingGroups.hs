@@ -179,7 +179,7 @@ dependencyExpr extraDeps modName expr
                               in (foldr (\g b -> Let g b rng)  depBody depGroups, S.union fv1 (S.difference fv2 names))
       Var name op rng      -> let uname = unqualify name -- if (qualifier name == modName) then unqualify name else name
                               in if isConstructorName name
-                                  then (expr,S.fromList [uname,newCreatorName uname])
+                                  then (expr,S.fromList [{-uname,-}newCreatorName uname])
                                   else let extra = case M.lookup (unqualifyFull name) extraDeps of
                                                      Just extras -> extras
                                                      Nothing     -> []
@@ -346,9 +346,9 @@ group defs deps
         -- determine strongly connected components (`scc`) in order of definitions
         defDepsList = -- [(id,S.toList fvs) | (id,fvs) <- M.toList defDeps]
                       concatMap (\def -> case M.lookup (defName def) defDeps of
-                                           Just fvs -> [(defName def,S.toList fvs)]
+                                           Just fvs -> [(def,S.toList fvs)]
                                            Nothing  -> []) defs
-        defOrderScc = scc defDepsList
+        defOrderScc = scc [(defName def,defdeps) | (def,defdeps) <- defDepsList]
 
         -- create a map from definition id's to definitions.
         defMap      = M.fromListWith (\xs ys -> ys ++ xs) [(defName def,[def]) | def <- defs]
@@ -370,15 +370,19 @@ group defs deps
                       in case concatMap getLine ids of
                            []    -> 0
                            lines -> minimum lines
-        defOrder    = reverse $ foldl insert [] defOrderScc -- in dependency order (from least to most)
+        defOrder    = reverse $            -- and reverse to go from least to most dependent
+                      foldl insert [] $    -- fold from least to most dependent, creating a list from most to least dependent
+                      defOrderScc          -- in dependency order (from least to most)
                     where
                       insert :: [[Name]] -> [Name] -> [[Name]]
-                      insert rdefs idgrp
+                      insert rdefs idgrp   -- insert `idgrp` into the reverse definitions (from most to least dependent)
                         = let n           = lineOf idgrp
                               idgrpDeps   = S.unions (map (\id -> M.find id defDeps) idgrp)
-                              goesAfter x = (n < lineOf x) && not (any (\id -> S.member id idgrpDeps) x)
+                              goesAfter x = (n < lineOf x) &&                           -- don't go beyond source order
+                                            not (any (\id -> S.member id idgrpDeps) x)  -- and not beyond an actual dependency
                           in case span goesAfter rdefs of
-                               (pre,post) -> pre ++ (idgrp : post)
+                               (pre,post) -> -- trace ("insert: " ++ show (idgrp,idgrpDeps,n) ++ " into " ++ show ([(p,lineOf p) | p <- pre],[(p,lineOf p) | p <- post])) $
+                                             pre ++ (idgrp : post)
 
         -- create a definition group from a list of mutual recursive identifiers.
         makeGroup ids  = case ids of
@@ -387,8 +391,9 @@ group defs deps
                                     else map DefNonRec (M.find id defMap)
                            _    -> [DefRec [def | id <- ids, def <- M.find id defMap]]
         finalGroup     = concatMap makeGroup defOrder
-    in -- trace ("groups: groupBindings: " ++ show defVars ++ "\n\ndependencies: " ++ show defDepsList ++
-       --             "\n\ninitial order: " ++ show defOrderScc ++ "\n\nfinal order: " ++ show defOrder) $
+    in -- trace ("groups:\n"
+       --        ++ unlines [show (defName def) ++ ": line " ++ show (posLine (rangeStart (defRange def))) ++ ": " ++ show defdeps | (def,defdeps) <- defDepsList]
+       --        ++ "\ninitial order: " ++ show defOrderScc ++ "\n\nfinal order: " ++ show defOrder) $
        finalGroup
 
 

@@ -8,7 +8,7 @@ effect state<s> {
 }
 
 fun xor() : amb bool {
-  val p = flip() 
+  val p = flip()
   val q = flip()
   (p||q) && not(p&&q)
 }
@@ -18,16 +18,16 @@ fun xors() : amb string {
 }
 
 fun foo() : <amb,state<int>> bool {
-  val p = flip() 
+  val p = flip()
   val i = get()
   set(i+1)
   if (i>0 && p) then xor() else False
-}         
+}
 
 fun foos() : <amb,state<int>> string {
   show(foo())
-}    
- 
+}
+
 fun amb_handle(action : () -> <amb|e> a) : e list<a> {
   with {
     return(x)  { [x] }
@@ -36,8 +36,9 @@ fun amb_handle(action : () -> <amb|e> a) : e list<a> {
   action()
 }
 
+
 fun state_handle( init, action ) {
-  var s : int := init   
+  var s : int := init
   with {
     fun get()  { s }
     fun set(i) { s := i }

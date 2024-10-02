@@ -332,6 +332,7 @@ isolate rng free ps eff
                                      let (Just syn) = mbSyn
                                          [bvar] = synInfoParams syn
                                          st     = subNew [(bvar,TVar h)] |-> synInfoType syn
+                                     -- traceDoc $ \penv -> text "isolate st: " <+> Pretty.ppType  penv{Pretty.showKinds=True,Pretty.showIds=True} st
                                      nofailUnify $ unify (effectExtend st tv) eff
                             neweff <- subst tv
                             sps    <- subst ps1
@@ -475,8 +476,8 @@ nicefyEffect eff
                           in -- Lib.Trace.trace ("* try alias: " ++ show (synInfoName syn, ls, sls)) $
                              case (isSubset [] sls ls) of
                                 Just rest
-                                  -> -- Lib.Trace.trace (" synonym replace: " ++ show (synInfoName syn, ls, sls, rest)) $
-                                      return ([TSyn (TypeSyn name (synInfoKind syn) (synInfoRank syn) (Just syn)) insts (effectFixed sls)], rest)
+                                  -> -- trace (" synonym replace: " ++ show (synInfoName syn, ls, sls, rest)) $
+                                     return ([TSyn (TypeSyn name (synInfoKind syn) (synInfoRank syn) (Just syn)) insts (effectFixed sls)], rest)
                                 _ -> return ([], ls)
 
 findInsts :: [TypeVar] -> [Tau] -> [Tau] -> ([Tau],[Tau])

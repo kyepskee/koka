@@ -45,11 +45,12 @@ type ParseInlines = Maybe (Gamma -> Error () [InlineDef])
 
 parseCore :: HasCallStack => FilePath -> FilePath -> IO (Error b (Core, ParseInlines))
 parseCore fname sourceName
-  = do input <- readInput fname
-       return $
-          -- Error monad
-          do ((res,warn),lexemes) <- lexParse True {-allow @-} False  {- no semi-colon insertion -} id (program sourceName) fname 1 input
-             return res
+  = let unique = (10000 :: Int)
+    in do input <- readInput fname
+          return $
+            -- Error monad
+            do ((res,warn),lexemes) <- lexParse True {-allow @-} False  {- no semi-colon insertion -} id (program unique sourceName) fname 1 input
+               return res
 
 
 parseInlines :: Core -> Source -> Env -> [Lexeme] -> ParseInlines
@@ -63,16 +64,16 @@ pInlines env
        eof
        return idefs
 
-program :: FilePath -> Source -> LexParser (Core,ParseInlines)
-program srcName source
+program :: Int -> FilePath -> Source -> LexParser (Core,ParseInlines)
+program unique0 srcName source
   = do many semiColon
-       (prog,env,inlines) <- pmodule srcName
+       (prog,env,inlines) <- pmodule unique0 srcName
        eof
        return (prog, parseInlines prog source env inlines)
 
 
-pmodule :: FilePath -> LexParser (Core,Env,[Lexeme])
-pmodule srcName
+pmodule :: Int -> FilePath -> LexParser (Core,Env,[Lexeme])
+pmodule unique0 srcName
   = do (rng,doc) <- dockeyword "module"
        keyword "interface"
        (name,_)<- modulepath
@@ -82,7 +83,7 @@ pmodule srcName
 
                   externImports <- semis externImportDecl
                   fixs <- semis fixDecl
-                  (impsyns,env1) <- semisEnv (envInitial name srcName impMap) localAlias
+                  (impsyns,env1) <- semisEnv (envInitial name srcName impMap unique0) localAlias
                   (tdefs,env2)   <- semisEnv env1 typeDecl
                   -- add synonyms
                   let syns = concatMap (\td -> case td of
@@ -1001,9 +1002,9 @@ envRange :: Env -> Int -> Int -> Int -> Int -> Range
 envRange env l1 c1 l2 c2
   = makeSourceRange (srcPath env) l1 c1 l2 c2
 
-envInitial :: Name -> FilePath -> ImportMap -> Env
-envInitial modName srcPath imports
-  = Env M.empty synonymsEmpty modName srcPath imports 1000 gammaEmpty M.empty
+envInitial :: Name -> FilePath -> ImportMap -> Int -> Env
+envInitial modName srcPath imports unique
+  = Env M.empty synonymsEmpty modName srcPath imports unique gammaEmpty M.empty
 
 envExtend :: Env -> (Name,Kind) -> Env
 envExtend (Env env syns mname srcpath imports unique gamma locals) (name,kind)
