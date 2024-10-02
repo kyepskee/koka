@@ -1,4 +1,4 @@
-import bench-queue
+import queue
 
 lazy type stream<a>
   SNil
