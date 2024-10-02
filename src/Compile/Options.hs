@@ -35,7 +35,7 @@ module Compile.Options( -- * Command line options
 
 import Debug.Trace
 import Data.Char              ( toLower, toUpper, isAlpha, isSpace )
-import Data.List              ( intersperse, isInfixOf )
+import Data.List              ( intersperse, isInfixOf, nub )
 import Data.Hashable
 import Control.Monad          ( when )
 import qualified System.Info  ( os, arch )
@@ -218,44 +218,49 @@ data Flags
          } deriving (Eq,Show)
 
 instance Hashable Flags where
-  hashWithSalt salt flags = hashWithSalt salt [
-    show $ target flags,
-    targetOS flags,
-    targetArch flags,
-    show $ platform flags,
-    -- show $ stackSize flags,
-    -- show $ heapSize flags,
-    show $ simplify flags,
-    show $ simplifyMaxDup flags,
-    concat $ includePath flags,
-    csc flags,
-    ccompPath flags,
-    concat $ ccompCompileArgs flags,
-    concat $ ccompIncludeDirs flags,
-    concat $ map show $ ccompDefs flags,
-    concat $ ccompLinkArgs flags,
-    concat $ ccompLinkSysLibs flags,
-    concat $ ccompLinkLibs flags,
-    show $ ccomp flags,
-    concat $ ccompLibDirs flags,
-    localBinDir flags,
-    localLibDir flags,
-    localShareDir flags,
-    show $ debug flags,
-    show $ optimize flags,
-    show $ optInlineMax flags,
-    show $ optctail flags,
-    show $ optctailCtxPath flags,
-    show $ optUnroll flags,
-    show $ optEagerPatBind flags,
-    show $ parcReuse flags,
-    show $ parcSpecialize flags,
-    show $ parcReuseSpec flags,
-    show $ parcBorrowInference flags,
-    show $ asan flags,
-    show $ useStdAlloc flags,
-    show $ optSpecialize flags
-   ]
+  hashWithSalt salt flags
+    = let h = hashWithSalt salt relevantFlags
+      in -- trace ("hash " ++ show salt ++ ", " ++ show h ++ unlines (map ("  " ++) relevantFlags)) $
+         h
+    where
+      relevantFlags = [
+          show $ target flags,
+          targetOS flags,
+          targetArch flags,
+          show $ platform flags,
+          -- show $ stackSize flags,
+          -- show $ heapSize flags,
+          show $ simplify flags,
+          show $ simplifyMaxDup flags,
+          concat $ nub $ includePath flags,
+          csc flags,
+          ccompPath flags,
+          concat $ ccompCompileArgs flags,
+          concat $ ccompIncludeDirs flags,
+          concat $ map show $ ccompDefs flags,
+          concat $ ccompLinkArgs flags,
+          concat $ ccompLinkSysLibs flags,
+          concat $ ccompLinkLibs flags,
+          show $ ccomp flags,
+          concat $ ccompLibDirs flags,
+          localBinDir flags,
+          localLibDir flags,
+          localShareDir flags,
+          show $ debug flags,
+          show $ optimize flags,
+          show $ optInlineMax flags,
+          show $ optctail flags,
+          show $ optctailCtxPath flags,
+          show $ optUnroll flags,
+          show $ optEagerPatBind flags,
+          show $ parcReuse flags,
+          show $ parcSpecialize flags,
+          show $ parcReuseSpec flags,
+          show $ parcBorrowInference flags,
+          show $ asan flags,
+          show $ useStdAlloc flags,
+          show $ optSpecialize flags
+        ]
 
 flagsHash :: Flags -> String
 flagsHash flags
@@ -1467,6 +1472,7 @@ versionMessage flags
   <-> text "share  :" <+> text (localShareDir flags)
   <-> text "output :" <+> text (fullBuildDir flags)
   <-> text "cc     :" <+> text (ccPath (ccomp flags))
+  <-> text "flags  :" <+> pretty (flagsHash flags)
   <->
   (color Gray $ vcat $ map text
   [ "Copyright 2019-2024, Microsoft Research, Daan Leijen, and others."

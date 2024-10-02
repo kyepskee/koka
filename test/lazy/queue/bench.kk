@@ -1,4 +1,4 @@
-module queue/bench
+module bench
 
 import std/os/env
 import std/num/random
