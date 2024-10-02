@@ -871,104 +871,7 @@ inferExpr propagated expect (Handler handlerSort scoped HandlerOverride mbAllowM
        inferExpr propagated expect lam
 
 inferExpr propagated expect (Case expr branches isLazyMatch rng)
-  = -- trace " inferExpr.Case" $
-    do (ctp,ceff,ccore0) <- allowReturn False $ disallowHole $ inferExpr Nothing Instantiated expr
-       -- infer branches
-       let matchedNames = extractMatchedNames expr
-       bress <- disallowHole $
-                case (propagated,branches) of
-                  (Nothing,(b:bs)) -> -- propagate the type of the first branch
-                    do bres@(tpeffs,_) <- inferBranch propagated ctp (getRange expr) matchedNames b
-                       let tp = case tpeffs of
-                                  (tp,_):_ -> tp
-                                  _        -> failure $ "Type.Infer.inferExpr.Case: branch without guard"
-                       bress <- mapM (inferBranch (Just (tp,getRange b)) ctp (getRange expr) matchedNames) bs
-                       return (bres:bress)
-                  _ -> mapM (inferBranch propagated ctp (getRange expr) matchedNames) branches
-       let (tpeffss,bcores) = unzip bress
-           (tps,effs) = unzip (concat tpeffss)
-       -- ensure branches match
-       let rngs = map (getRange . branchGuards) branches
-           brngs = map getRange branches
-       resTp  <- inferUnifyTypes checkMatch (zip tps (zip brngs rngs))
-       -- resEff <- addTopMorphisms rng ((getRange expr,ceff):(zip rngs effs))
-       {-
-       resEff <- inferUnifies (checkEffect rng) ((getRange expr,ceff):(zip rngs effs))
-       -}
-       resEff <- Op.freshEffect
-       mapM_ (\(rng,eff) -> inferUnify (checkEffectSubsume rng) rng eff resEff) ((getRange expr,ceff):(zip rngs effs))
-       -- check scrutinee type
-       stp <- subst ctp
-       if (typeIsCaseLegal stp)
-        then return ()
-        else typeError rng (getRange expr) (text "can only match on literals or data types") stp []
-       -- get data info and analyze branches
-       dataInfo <- findDataInfo (getTypeName stp)
-       defName  <- currentDefName
-       sbcores  <- subst bcores
-       newtypes <- getNewtypes
-       let (matchIsTotal,warnings,cbranches) = analyzeBranches newtypes defName rng sbcores [stp] [dataInfo] isLazyMatch
-       mapM_ (\(rng,warning) -> infWarning rng warning) warnings
-       cbranches <- if matchIsTotal
-                  then return cbranches
-                  else do moduleName <- getModuleName
-                          let litPos = Lit (LitString (show moduleName ++ show rng) rng)
-                              litDef = Lit (LitString (show defName) rng)
-                              exnBranch = Branch (PatWild rng) [Guard guardTrue
-                                              (App (Var namePatternMatchError False rng) [(Nothing, litPos), (Nothing, litDef)] rng)]
-                          cexnBranch <- inferBranch (Just (resTp,rng)) ctp (getRange expr) matchedNames exnBranch
-                          case cexnBranch of
-                            ((tp, eff):_, cbranch) ->
-                                 do -- inferUnify (checkMatch rng) rng tp resTp  -- already propagated
-                                    inferUnify (checkEffectSubsume rng) rng eff resEff
-                                    return (cbranches ++ [cbranch])
-                            _ -> failure "Type.Infer.inferExpr.Case: should never happen, cexnBranch always contains a guard"
-       -- add lazy force
-       -- todo: warning if lazy match on regular datatype?
-       ccore1  <- if not isLazyMatch && (dataInfoIsLazy dataInfo)
-                    then do -- traceDefDoc $ \penv -> text "match force:" <+> prettyDataInfo penv False False  dataInfo
-                            let forceName = typeQualifiedName (dataInfoName dataInfo) "force"
-                            (force,forceTp,forceInfo) <- resolveFunName forceName (CtxFunArgs False 1 [] Nothing) rng (getRange expr)
-                            let cforce   = coreExprFromNameInfo force forceInfo
-                            case ccore0 of
-                              Core.App (Core.Var fname _) [_] | force == Core.getName fname -> return ccore0 -- don't duplicate as force(force(expr))
-                              _ -> do (ftp,_,coref) <- instantiate rng forceTp
-                                      case splitFunType ftp of
-                                        Just (_,_,rtp) -> inferUnify (Infer rng) rng ctp rtp
-                                      return $ Core.App (coref cforce) [ccore0]
-                  else return ccore0
-       -- return core
-       core    <- subst (Core.Case [ccore1] cbranches)
-       sresEff <- subst resEff
-       (gresTp,gcore) <- maybeInstantiateOrGeneralize rng (getRange branches) sresEff expect resTp core
-       return (gresTp,sresEff,gcore)
-  where
-    typeIsCaseLegal tp
-      = case expandSyn tp of
-          TApp (TCon _) _  -> True
-          TCon _           -> True
-          -- TApp (TVar _) _  -> True
-          -- TVar _           -> True
-          _                -> False
-
-    getTypeName tp
-      = case expandSyn tp of
-          TApp (TCon tc) _  -> typeconName tc
-          TCon tc           -> typeconName tc
-          _                 -> failure ("Type.Infer.inferExpr.Case.getTypeName: not a valid scrutinee? " ++ show tp)
-
-
-    extractMatchedNames expr
-      = case expr of
-          Parens e _ _ _              -> extractMatchedNames e
-          App (Var tname _ _) args _  | isNameTuple tname -> concat (map (extractMatchedNamesX . snd) args)
-          _                           -> extractMatchedNamesX expr
-
-    extractMatchedNamesX expr
-      = case expr of
-          Var name _ _ -> [name]
-          _            -> []
-
+  = inferCase propagated expect expr branches isLazyMatch rng
 
 inferExpr propagated expect (Var name isOp rng)
   = inferVar propagated expect name rng True
@@ -1643,12 +1546,117 @@ compilationConstants
    ]
 
 {--------------------------------------------------------------------------
-  infer branches and patterns
+  infer match, branches and patterns
 --------------------------------------------------------------------------}
+data PatternKind
+  = PatternOutermost{ matchIsLazy :: !Bool }
+  | PatternNested
 
-inferBranch :: Maybe (Type,Range) -> Type -> Range -> [Name] -> Branch Type -> Inf ([(Type,Effect)],Core.Branch)
-inferBranch propagated matchType matchRange matchedNames branch@(Branch pattern guards)
-  = inferPattern matchType (getRange branch) pattern (
+inferCase :: Maybe (Type, Range) -> Expect -> Expr Type -> [Branch Type] -> Bool -> Range -> Inf (Type, Effect, Core.Expr)
+inferCase propagated expect expr branches isLazyMatch rng
+  = -- trace " inferExpr.Case" $
+    do (ctp,ceff,ccore0) <- allowReturn False $ disallowHole $ inferExpr Nothing Instantiated expr
+       -- infer branches
+       let matchedNames = extractMatchedNames expr
+           patkind = PatternOutermost isLazyMatch
+       bress <- disallowHole $
+                case (propagated,branches) of
+                  (Nothing,(b:bs)) -> -- propagate the type of the first branch
+                    do bres@(tpeffs,_) <- inferBranch patkind propagated ctp (getRange expr) matchedNames b
+                       let tp = case tpeffs of
+                                  (tp,_):_ -> tp
+                                  _        -> failure $ "Type.Infer.inferExpr.Case: branch without guard"
+                       bress <- mapM (inferBranch patkind (Just (tp,getRange b)) ctp (getRange expr) matchedNames) bs
+                       return (bres:bress)
+                  _ -> mapM (inferBranch patkind propagated ctp (getRange expr) matchedNames) branches
+       let (tpeffss,bcores) = unzip bress
+           (tps,effs) = unzip (concat tpeffss)
+       -- ensure branches match
+       let rngs = map (getRange . branchGuards) branches
+           brngs = map getRange branches
+       resTp  <- inferUnifyTypes checkMatch (zip tps (zip brngs rngs))
+       -- resEff <- addTopMorphisms rng ((getRange expr,ceff):(zip rngs effs))
+       {-
+       resEff <- inferUnifies (checkEffect rng) ((getRange expr,ceff):(zip rngs effs))
+       -}
+       resEff <- Op.freshEffect
+       mapM_ (\(rng,eff) -> inferUnify (checkEffectSubsume rng) rng eff resEff) ((getRange expr,ceff):(zip rngs effs))
+       -- check scrutinee type
+       stp <- subst ctp
+       if (typeIsCaseLegal stp)
+        then return ()
+        else typeError rng (getRange expr) (text "can only match on literals or data types") stp []
+       -- get data info and analyze branches
+       dataInfo <- findDataInfo (getTypeName stp)
+       defName  <- currentDefName
+       sbcores  <- subst bcores
+       newtypes <- getNewtypes
+       let (matchIsTotal,warnings,cbranches) = analyzeBranches newtypes defName rng sbcores [stp] [dataInfo] isLazyMatch
+       mapM_ (\(rng,warning) -> infWarning rng warning) warnings
+       cbranches <- if matchIsTotal
+                  then return cbranches
+                  else do moduleName <- getModuleName
+                          let litPos = Lit (LitString (show moduleName ++ show rng) rng)
+                              litDef = Lit (LitString (show defName) rng)
+                              exnBranch = Branch (PatWild rng) [Guard guardTrue
+                                              (App (Var namePatternMatchError False rng) [(Nothing, litPos), (Nothing, litDef)] rng)]
+                          cexnBranch <- inferBranch patkind (Just (resTp,rng)) ctp (getRange expr) matchedNames exnBranch
+                          case cexnBranch of
+                            ((tp, eff):_, cbranch) ->
+                                 do -- inferUnify (checkMatch rng) rng tp resTp  -- already propagated
+                                    inferUnify (checkEffectSubsume rng) rng eff resEff
+                                    return (cbranches ++ [cbranch])
+                            _ -> failure "Type.Infer.inferExpr.Case: should never happen, cexnBranch always contains a guard"
+       -- add lazy force
+       -- todo: warning if lazy match on regular datatype?
+       ccore1  <- if not isLazyMatch && (dataInfoIsLazy dataInfo)
+                    then do -- traceDefDoc $ \penv -> text "match force:" <+> prettyDataInfo penv False False  dataInfo
+                            let forceName = typeQualifiedName (dataInfoName dataInfo) "force"
+                            (force,forceTp,forceInfo) <- resolveFunName forceName (CtxFunArgs False 1 [] Nothing) rng (getRange expr)
+                            let cforce   = coreExprFromNameInfo force forceInfo
+                            case ccore0 of
+                              Core.App (Core.Var fname _) [_] | force == Core.getName fname -> return ccore0 -- don't duplicate as force(force(expr))
+                              _ -> do (ftp,_,coref) <- instantiate rng forceTp
+                                      case splitFunType ftp of
+                                        Just (_,_,rtp) -> inferUnify (Infer rng) rng ctp rtp
+                                      return $ Core.App (coref cforce) [ccore0]
+                  else return ccore0
+       -- return core
+       core    <- subst (Core.Case [ccore1] cbranches)
+       sresEff <- subst resEff
+       (gresTp,gcore) <- maybeInstantiateOrGeneralize rng (getRange branches) sresEff expect resTp core
+       return (gresTp,sresEff,gcore)
+  where
+    typeIsCaseLegal tp
+      = case expandSyn tp of
+          TApp (TCon _) _  -> True
+          TCon _           -> True
+          -- TApp (TVar _) _  -> True
+          -- TVar _           -> True
+          _                -> False
+
+    extractMatchedNames expr
+      = case expr of
+          Parens e _ _ _              -> extractMatchedNames e
+          App (Var tname _ _) args _  | isNameTuple tname -> concat (map (extractMatchedNamesX . snd) args)
+          _                           -> extractMatchedNamesX expr
+
+    extractMatchedNamesX expr
+      = case expr of
+          Var name _ _ -> [name]
+          _            -> []
+
+getTypeName :: Type -> Name
+getTypeName tp
+  = case expandSyn tp of
+      TApp (TCon tc) _  -> typeconName tc
+      TCon tc           -> typeconName tc
+      _                 -> failure ("Type.Infer.inferExpr.Case.getTypeName: not a valid scrutinee? " ++ show tp)
+
+
+inferBranch :: PatternKind -> Maybe (Type,Range) -> Type -> Range -> [Name] -> Branch Type -> Inf ([(Type,Effect)],Core.Branch)
+inferBranch patkind propagated matchType matchRange matchedNames branch@(Branch pattern guards)
+  = inferPattern patkind matchType (getRange branch) pattern (
     \pcore gcores ->
        do when (rangeNull /= getRange pattern) $
             -- check for unused pattern bindings
@@ -1714,17 +1722,17 @@ inferGuard propagated branchRange (Guard test expr)
         return ((btp,beff),coreGuard)
 
 
-inferPatternX :: Type -> Range -> Pattern Type -> Inf (Core.Pattern,[(Name,NameInfo)])
-inferPatternX matchType branchRange pattern
-  = do (_,res) <- inferPattern matchType branchRange pattern (\pcore infGamma -> return (pcore,infGamma)) $ \infGamma ->
+inferPatternNested :: PatternKind -> Type -> Range -> Pattern Type -> Inf (Core.Pattern,[(Name,NameInfo)])
+inferPatternNested patkind matchType branchRange pattern
+  = do (_,res) <- inferPattern patkind matchType branchRange pattern (\pcore infGamma -> return (pcore,infGamma)) $ \infGamma ->
                      do smatchType <- subst matchType
                         return ([(smatchType,typeTotal)],infGamma)
        return res
 
-inferPattern :: HasTypeVar a => Type -> Range -> Pattern Type -> (Core.Pattern -> a -> Inf b)
+inferPattern :: HasTypeVar a => PatternKind -> Type -> Range -> Pattern Type -> (Core.Pattern -> a -> Inf b)
                   -> ([(Name,NameInfo)] -> Inf ([(Type,Effect)],a))
                   -> Inf ([(Type,Effect)],b)
-inferPattern matchType branchRange (PatCon name patterns0 nameRange range) withPattern inferGuards
+inferPattern patkind matchType branchRange (PatCon name patterns0 nameRange range) withPattern inferGuards
   = do (qname,gconTp,repr,coninfo) <- resolveConPatternName name (length patterns0) range
        addRangeInfo nameRange (RM.Id qname (RM.NICon gconTp (conInfoDoc coninfo)) [] False)
        -- traceDoc $ \env -> text "inferPattern.constructor:" <+> pretty qname <.> text ":" <+> ppType env gconTp
@@ -1734,6 +1742,20 @@ inferPattern matchType branchRange (PatCon name patterns0 nameRange range) withP
            let (conParTps,conEffTp,conResTp) = splitConTp conRho
            inferUnify (checkConTotal range) nameRange conEffTp typeTotal
            inferUnify (checkConMatch range) nameRange conResTp matchType
+
+           -- check valid lazy constructors
+           dataInfo <- findDataInfo (getTypeName conResTp)
+           when (dataInfoIsLazy dataInfo) $
+             case patkind of
+               PatternOutermost isLazyMatch
+                -> do when (conInfoIsLazy coninfo && not isLazyMatch) $
+                        do penv <- getPrettyEnv
+                           infError nameRange $ ppName penv qname <.> text ": lazy constructors are not allowed in a (non lazy) match"
+               PatternNested
+                -> do penv <- getPrettyEnv
+                      infError nameRange $ ppName penv qname <.> text ": constructors of a lazy type cannot be matched in a nested pattern (but must always be matched as an outermost pattern)"
+
+
            patterns <- matchPatterns range nameRange conRho conParTps patterns0
                        {-
                        if (length conParTps < length patterns0)
@@ -1743,7 +1765,7 @@ inferPattern matchType branchRange (PatCon name patterns0 nameRange range) withP
                        -}
            (cpatterns,infGammas) <- fmap unzip $ mapM (\(parTp,pat) ->
                                                    do sparTp <- subst parTp
-                                                      inferPatternX sparTp branchRange pat)
+                                                      inferPatternNested PatternNested sparTp branchRange pat)
                                             (zip (map snd conParTps) (patterns))
            let infGamma  = concat infGammas
            (btpeffs,coreGuards0) <- inferGuards infGamma
@@ -1784,31 +1806,31 @@ inferPattern matchType branchRange (PatCon name patterns0 nameRange range) withP
                cont conRho xvars
 
 
-inferPattern matchType branchRange (PatVar binder) withPattern inferPart
+inferPattern patkind matchType branchRange (PatVar binder) withPattern inferPart
   =  do addRangeInfo (binderNameRange binder) (RM.Id (binderName binder) (RM.NIValue "val" matchType "" (isAnnotatedBinder binder)) [] True)
         case (binderType binder) of
           Just tp -> inferUnify (checkAnn (getRange binder)) (binderNameRange binder) matchType tp
           Nothing -> return ()
-        (cpat,infGamma0) <- inferPatternX matchType branchRange (binderExpr binder)
+        (cpat,infGamma0) <- inferPatternNested patkind matchType branchRange (binderExpr binder)
         let infGamma = ([(binderName binder,(createNameInfoX Public (binderName binder) DefVal (binderNameRange binder) matchType ""))] ++ infGamma0)
         (btpeffs,x) <- inferPart infGamma
         res <- withPattern (Core.PatVar (Core.TName (binderName binder) matchType) cpat) x
         return (btpeffs,res)
 
-inferPattern matchType branchRange (PatWild range) withPattern inferPart
+inferPattern patkind matchType branchRange (PatWild range) withPattern inferPart
   =  do (btpeffs,x) <- inferPart []
         res <- withPattern Core.PatWild  x
         return (btpeffs,res)
 
-inferPattern matchType branchRange (PatAnn pat tp range) withPattern inferPart
-  = inferPattern tp range pat withPattern $ \infGamma ->
+inferPattern patkind matchType branchRange (PatAnn pat tp range) withPattern inferPart
+  = inferPattern patkind tp range pat withPattern $ \infGamma ->
       do inferUnify (checkAnn range) (getRange pat) matchType tp  -- TODO: improve error message
          inferPart infGamma
 
-inferPattern matchType branchRange (PatParens pat range) withPattern inferPart
-  = inferPattern matchType branchRange pat withPattern inferPart
+inferPattern patkind matchType branchRange (PatParens pat range) withPattern inferPart
+  = inferPattern patkind matchType branchRange pat withPattern inferPart
 
-inferPattern matchType branchRange (PatLit lit) withPattern inferPart
+inferPattern patkind matchType branchRange (PatLit lit) withPattern inferPart
   = let (pat,tp) = case lit of
                     LitInt i _  -> (Core.PatLit (Core.LitInt i), typeInt)
                     LitChar c _  -> (Core.PatLit (Core.LitChar c), typeChar)

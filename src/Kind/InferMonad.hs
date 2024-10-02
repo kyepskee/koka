@@ -395,7 +395,7 @@ lookupDataInfo name
 
 withDataEffects :: [(Name,DataEffect)] -> KInfer a -> KInfer a
 withDataEffects xs (KInfer ki)
-  = trace ("withDataEffects: " ++ show xs) $
+  = -- trace ("withDataEffects: " ++ show xs) $
     KInfer (\env -> \st -> ki (env{ dataEffects = M.fromList xs }) st)
 
 lookupDataEffect :: Name -> KInfer DataEffect
