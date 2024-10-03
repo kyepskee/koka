@@ -62,8 +62,8 @@ export class KokaConfig {
 
   refreshConfig(vsConfig: vscode.WorkspaceConfiguration): void {
     this.enableDebugExtension = vsConfig.get('dev.debugExtension') as boolean
-    this.developmentPath = vsConfig.get('dev.developmentPath') as string ?? ""
-    this.cwd = vsConfig.get('languageServer.workingDirectory') as string
+    this.developmentPath = expandHome(vsConfig.get('dev.developmentPath') as string ?? "")
+    this.cwd = expandHome(vsConfig.get('languageServer.workingDirectory')) as string
     if (!this.cwd) {
       if (vscode.workspace.workspaceFolders)
         this.cwd = vscode.workspace.workspaceFolders[0].uri.fsPath
@@ -184,10 +184,10 @@ function findCompilerPaths(vsConfig: vscode.WorkspaceConfiguration, developmentP
   let compPaths = []
 
   // add user configured path?
-  const userCompiler = (vsConfig.get('languageServer.compiler') as string || "")
+  const userCompiler = expandHome(vsConfig.get('languageServer.compiler') as string || "")
   if (userCompiler) {
     if (!fs.existsSync(userCompiler)) {
-      //vs.window.showInformationMessage(`Koka: configured compiler path does not exist: ${userCompiler}`)
+      vscode.window.showInformationMessage(`Koka: configured compiler path does not exist: ${userCompiler}`)
       console.log('Koka: cannot find user configured compiler: ' + userCompiler)
     }
     else {
@@ -211,13 +211,14 @@ function findCompilerPaths(vsConfig: vscode.WorkspaceConfiguration, developmentP
     const result = child_process.execSync(cmdGetInstallRoot, { cwd: developmentPath, env: process.env })
     const exePath = path.join(result.toString().trim(), 'bin', kokaExeName)
     if (fs.existsSync(exePath)) {
-      // vs.window.showInformationMessage(`Koka: found developer build at: ${devp}`)
+      // vscode.window.showInformationMessage(`Koka: found developer build at: ${exePath}`)
       console.log("Koka: found development build of koka at " + exePath)
       compPaths.push(exePath)
     }
     else {
+      // vscode.window.showInformationMessage(`Koka: cannot find developer build at: ${exePath}`)
       console.log("Koka: developer environment found, but no binary was built")
-    }
+    }    
   }
 
   // check PATH and local binary installation directories
@@ -454,4 +455,8 @@ function getCompilerSamplesDir(compilerPath: string, compilerVersion: string): s
     const examples = path.join(root, "share", "koka", `v${ver}`, "lib", "samples")
     return examples;
   }
+}
+
+function expandHome( path : string ) : string {
+  return (path ? path.replace("~",home) : "");
 }
