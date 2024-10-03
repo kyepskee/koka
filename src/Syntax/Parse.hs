@@ -32,6 +32,7 @@ module Syntax.Parse( parseProgramFromFile, parseProgramFromString
                    , keyword, dockeyword, docconid
                    , typeDeclKind
                    , paramInfo
+                   , memberDoc
                    ) where
 
 import Lib.Trace
@@ -642,10 +643,34 @@ dataTypeDecl dvis =
       (cs,crng)    <- semiBracesRanged (constructor defvis tpars resTp) <|> return ([],rangeNull)
       let (constrs,creatorss) = unzip cs
           range   = combineRanges [vrng,trng, getRange (tbind kind),prng,crng]
-      return (DataType name tpars constrs range vis typeSort ddef DataNoEffect doc, concat creatorss)
+      let docx = constructorDoc doc constrs
+
+      return (DataType name tpars constrs range vis typeSort ddef DataNoEffect docx, concat creatorss)
    where
     tpVar tb = TpVar (tbinderName tb) (tbinderRange tb)
     tpCon tb = TpCon (tbinderName tb) (tbinderRange tb)
+
+
+constructorDoc :: String -> [UserCon UserType UserType UserKind] -> String
+constructorDoc doc constrs
+  = doc {-
+    memberDoc doc "constructors"
+    [ -- (if isPrivate (userconVis con) then "private " else "") ++
+      (maybe "" (\fip -> "lazy ") (userConLazy con)) ++
+      "con " ++ show (userconName con) ++
+      (if null (userconParams con) then ""
+          else "(" ++ concat (intersperse "," [show (binderName par) | (parvis,par) <- userconParams con]) ++ ")")
+      | con <- constrs ]
+    -}
+
+memberDoc :: String -> String -> [String] -> String
+memberDoc doc header []  = doc
+memberDoc doc header members
+  = if null doc then mdoc else doc ++ "\n// * * *\n" ++ mdoc
+  where
+    mdoc = "// " ++ header ++ ":\n// ```koka\n" ++
+           unlines (map ("// "++) members) ++
+           "// ```\n"
 
 structDecl dvis =
    do (vis,defvis,ddef,vrng,trng,doc) <-
@@ -669,7 +694,8 @@ structDecl dvis =
       let (tid,rng) = getRName name
           conId     = toConstructorName tid
           (usercon,creators) = makeUserCon conId tpars resTp [] pars Nothing rng (combineRange rng prng) defvis doc
-      return (DataType name tpars [usercon] (combineRanges [vrng,trng,rng,prng]) vis Inductive ddef DataNoEffect doc, creators)
+          docx = constructorDoc doc [usercon]
+      return (DataType name tpars [usercon] (combineRanges [vrng,trng,rng,prng]) vis Inductive ddef DataNoEffect docx, creators)
 
 tpVar tb = TpVar (tbinderName tb) (tbinderRange tb)
 tpCon tb = TpCon (tbinderName tb) (tbinderRange tb)
@@ -952,10 +978,12 @@ makeEffectDecl decl =
 
       -- declare the effect type (for resources, generate a hidden constructor to check the types)
       docEffect  = "effect `:" ++ show id ++ "`\n"
-      docx       = doc ++ docOperations
-      docOperations = "\n// Operations:\n// ```koka\n" ++ (unlines $ map ("// "++) $
-                      [ show (opdeclSort op) ++ " " ++ show (toBasicOperationsName (opdeclName op)) | op <- operations ])
-                      ++ "// ```\n"
+      docx       = memberDoc doc "operations"
+                    [ show (opdeclSort op) ++ " " ++ show (toBasicOperationsName (opdeclName op)) ++
+                      if null (opdeclParams op) && opdeclSort op == OpVal then ""
+                       else "(" ++ concat (intersperse "," [show (binderName par) | par <- opdeclParams op ]) ++ ")"
+                    | op <- operations ]
+
       {-
       (effTpDecl,wrapAction)
                 = if isInstance

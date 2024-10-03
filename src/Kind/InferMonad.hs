@@ -28,6 +28,7 @@ module Kind.InferMonad( KInfer
 
 import Control.Applicative
 import Control.Monad
+import Data.List(intersperse)
 
 import Lib.Trace
 import Lib.PPrint
@@ -244,6 +245,17 @@ extendKGamma ranges (Core.TypeDefGroup (tdefs)) ki
       where
         nameKind (Core.Synonym synInfo) = (synInfoName synInfo, synInfoKind synInfo, synInfoDoc synInfo)
         nameKind (Core.Data dataInfo)   = (dataInfoName dataInfo, dataInfoKind dataInfo, dataInfoDoc dataInfo)
+
+
+
+memberDoc :: String -> String -> [String] -> String
+memberDoc doc header []  = doc
+memberDoc doc header members
+  = if null doc then mdoc else doc ++ "\n// * * *\n" ++ mdoc
+  where
+    mdoc = "// " ++ header ++ ":\n// ```koka\n" ++
+           unlines (map ("// "++) members) ++
+           "// ```\n"
 
 
 -- | This extend KGamma does not check for duplicates
