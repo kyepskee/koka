@@ -54,7 +54,7 @@ noinline fun stream/eval( s : stream<a> ) : _ stream<a>
            SNil        -> lazy/whnf-update(s,stream/force(sreverse(post)))  // does this guarantee we never update an indirection with an indirection?
            SCons(x,xx) -> lazy/whnf-update(s,SCons(x,SAppRev(xx,post)))     // no recursive `stream/force` is inserted as we can statically see the `SCons`
     stream/Indirect(ind)   // generated
-      -> ind               // we don't use `stream/eval(ind)` as we guarantee `ind` is never an indirection itself (and always whnf)
+      -> ind               // we don't use `stream/force(ind)` as we guarantee `ind` is never an indirection itself (and always whnf)
     _ -> s
 
 noinline fun stream/whnf( s : stream<a> ) : div stream<a>
@@ -73,7 +73,7 @@ val stream/lazy-tag = 3   // always the indirection tag; anything >= 3 is consid
 inline fun stream/force( s : stream<a> ) : div stream<a>
   // `lazy/datatype-ptr-is-whnf` is fast as it just does `s->tag < stream/lazy-tag` (so we want to inline this)
   // (if a type can have singletons, it becomes `lazy/datatype-is-whnf(s)` == `is-value(s) || s->tag < stream/lazy-tag`)
-  if lazy/datatype-ptr-is-whnf(s,stream/lazy-tag)
+  if lazy/datatype-is-whnf(s,stream/lazy-tag)
     then s
     else stream-whnf(s)
 */

@@ -420,7 +420,8 @@ lazyAddUpdate info conInfo evalName arg topExpr
                       isWhnfConBranch (Branch pat guards) = isWhnfConPat pat
                       forceName = typeQualifiedName (dataInfoName info) "force"
                       exprForce = if not lazyMatch && any isWhnfConBranch brs
-                                    then App (Var forceName False (getRange expr)) [(Nothing,expr)] (getRange expr)
+                                    then let r = rangeHide (getRange expr)
+                                         in App (Var forceName False r) [(Nothing,expr)] r
                                     else expr
                   return (Case exprForce brs' lazyMatch range)
           Parens expr name pre range -> do expr' <- add expr
@@ -459,18 +460,18 @@ lazyAddUpdate info conInfo evalName arg topExpr
                              lazyUpdate expr
 
     unknownUpdate expr
-      = do let rng = getRange expr
+      = do let rng = rangeHide $ getRange expr
            updateWarning rng $ \_ -> text "in-place as the result constructor is not statically known -- using an indirection instead"
            lazyUpdate (App (Var evalName False rng) [(Nothing,expr)] rng)
 
     recursiveUpdate expr cinfo
-      = do let rng = getRange expr
+      = do let rng = rangeHide $ getRange expr
            updateWarning rng $ \showCon -> text "in-place as the lazy result constructor" <+> showCon (conInfoName cinfo) <+> text "needs to be recursively forced -- using an indirection instead"
            lazyUpdate (App (Var evalName False rng) [(Nothing,expr)] rng)
 
     -- lazyUpdate :: Expr t -> KInfer (Expr t)
     lazyUpdate expr
-      = let rng = getRange expr
+      = let rng = rangeHide $ getRange expr
         in return $ App (Var nameLazyUpdate False rng) [(Nothing,arg),(Nothing,expr)] rng
 
 
@@ -1087,7 +1088,7 @@ infParam expected context (name,tp)
 addLazyIndirect (DataType newtp targs constructors range vis sort ddef dataEff doc)
   | any userConIsLazy constructors || dataDefIsLazy ddef
   = do let (lazyCons,strictCons) = partition userConIsLazy constructors
-           rng                 = tbinderNameRange newtp
+           rng                 = rangeHide $ tbinderNameRange newtp
            makeTpApp t targs   = if null targs then t else TpApp t targs rng
            indirectName        = newHiddenName "indirect"
            indirectPar         = ValueBinder (indirectName)
@@ -1252,7 +1253,8 @@ resolveTypeDef isRec recNames (DataType newtp params constructors range vis sort
                       _ -> return dataInfo0
        -}
        -- trace (showTypeBinder newtp') $
-       let declaration = (if sort /= Inductive then "" else (if dataDefIsValue ddef1 then "value " else "reference "))
+       let declaration = (if dataInfoIsLazy dataInfo then "lazy " else "") ++
+                         (if sort /= Inductive then "" else (if dataDefIsValue ddef1 then "value " else "reference "))
                           ++ show sort
        addRangeInfo range (Decl declaration (getName newtp') (mangleTypeName (getName newtp')) Nothing)
        return (Core.Data dataInfo, concat lazyExprss)
