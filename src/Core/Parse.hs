@@ -223,7 +223,7 @@ typeDecl env
 
 conDecl tname foralls sort env
   = do (vis,mbLazy) <- try $ do vis <- vispub
-                                lazy <- option Nothing (do{ specialId "lazy"; fip <- parseTailFip; return (Just fip) })
+                                lazy <- option Nothing (do{ specialId "lazy"; (fip,_) <- parseTailFip; return (Just fip) })
                                 keyword "con"
                                 return (vis,lazy)
        (name,(_,doc)) <- docconid
@@ -254,7 +254,7 @@ parseTypeMod :: LexParser (DataDef,DataKind,DataEffect)
 parseTypeMod
  =   do{ specialId "open"; return (DataDefOpen False, Inductive, DataNoEffect) }
  <|> do{ specialId "extend"; return (DataDefOpen True, Inductive, DataNoEffect) }
- <|> do{ specialId "lazy"; fip <- parseTailFip; return (DataDefLazy fip, Inductive, DataNoEffect) }
+ <|> do{ specialId "lazy"; (fip,_) <- parseTailFip; return (DataDefLazy fip, Inductive, DataNoEffect) }
  <|> do specialId "value"
         vrepr <- parseValueRepr
         return (DataDefValue vrepr, Inductive, DataNoEffect)
@@ -312,7 +312,7 @@ pdefSort
   = do isRec <- do{ specialId "recursive"; return True } <|> return False
        inl <- parseInline
        try $
-        (do fip <- parseTailFip
+        (do (fip,_) <- parseTailFip
             (_,doc) <- dockeyword "fun"
             _       <- do { specialOp "**"; return ()}
                        <|>
@@ -330,7 +330,7 @@ pdefSort
 externDecl :: Env -> LexParser External
 externDecl env
   = do (vis,fip,doc)  <- try $ do vis <- vispub
-                                  fip <- parseTailFip
+                                  (fip,_) <- parseTailFip
                                   (_,doc) <- dockeyword "extern"
                                   return (vis,fip,doc)
        (name,_) <- funid True
@@ -422,7 +422,7 @@ inlineDefSort
                     (s,_) <- stringLit
                     return [if c == '^' then Borrow else Own | c <- s]
                  <|> return []
-       (do (fip,doc) <- try $ do fip <- parseTailFip
+       (do (fip,doc) <- try $ do (fip,_) <- parseTailFip
                                  (_,doc) <- dockeyword "fun"
                                  return (fip,doc)
            return (DefFun pinfos fip,inl,isRec,spec,doc)

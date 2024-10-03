@@ -412,9 +412,9 @@ externDecl dvis
             <|>
              try ( do (vis,vrng) <- visibility dvis
                       inline     <- parseInline
-                      fip        <- parseTailFip
+                      (fip,frng) <- parseTailFip
                       (krng,doc) <- dockeyword "extern"
-                      return (Right (combineRange vrng krng, vis, doc, inline, fip)))
+                      return (Right (combineRanges [vrng,frng,krng], vis, doc, inline, fip)))
        case lr of
          Left p -> do extern <- p
                       return [DefExtern extern]
@@ -725,7 +725,7 @@ typeDeclKind
     do (rng1, ddef)          <- do { rng <- specialId "open"; return (rng, DataDefOpen False) }
                             <|> do { rng <- specialId "extend"; return (rng, DataDefOpen True) }
                             <|> do { rng <- specialId "value"; return (rng, DataDefValue valueReprZero) }
-                            <|> do { rng <- specialId "lazy"; fip <- parseTailFip; return (rng, DataDefLazy fip) }
+                            <|> do { rng <- specialId "lazy"; (fip,frng) <- parseTailFip; return (combineRange rng frng, DataDefLazy fip) }
                             <|> do { rng <- specialIdOr "reference" ["ref","heap"];
                                     return (rng, DataDefNormal) }
                             <|> return (rangeNull, DataDefAuto False {-not a struct-})
@@ -746,15 +746,15 @@ typeKindParams
 
 constructor :: Visibility -> [UserTypeBinder] -> UserType -> LexParser (UserCon UserType UserType UserKind, [UserDef])
 constructor defvis foralls resTp
-  = do ((vis,vrng),(rng0,doc),(con,rng),mbLazyFip) <- try $  do v <- visibility defvis
-                                                                mbLazyFip <- do specialId "lazy"
-                                                                                fip <- parseTailFip
-                                                                                return (Just fip)
-                                                                              <|>
-                                                                                return Nothing
-                                                                krng <- keyword "con" <|> return rangeNull
-                                                                (c,(crng,doc)) <- docconid
-                                                                return (v,(krng,doc),(c,crng),mbLazyFip)
+  = do ((vis,vrng),(rng0,doc),(con,rng),(mbLazyFip,lrng)) <- try $ do v <- visibility defvis
+                                                                      mbLazyFip <- do specialId "lazy"
+                                                                                      (fip,rng) <- parseTailFip
+                                                                                      return (Just fip,rng)
+                                                                                    <|>
+                                                                                      return (Nothing,rangeNull)
+                                                                      krng <- keyword "con" <|> return rangeNull
+                                                                      (c,(crng,doc)) <- docconid
+                                                                      return (v,(krng,doc),(c,crng),mbLazyFip)
        exists    <- typeparams
        (pars,prng) <- conPars vis
        mbLazyExpr  <- case mbLazyFip of
@@ -762,7 +762,7 @@ constructor defvis foralls resTp
                         Just fip -> do  keyword "->"
                                         exp <- blockexpr
                                         return (Just (fip,exp))
-       return (makeUserCon con foralls resTp exists pars mbLazyExpr rng (combineRanges [vrng,rng0,rng,getRange exists,prng]) vis doc)
+       return (makeUserCon con foralls resTp exists pars mbLazyExpr rng (combineRanges [vrng,rng0,rng,lrng,getRange exists,prng]) vis doc)
 
 makeUserCon :: Name -> [UserTypeBinder] -> UserType -> [UserTypeBinder] -> [(Visibility,ValueBinder UserType (Maybe UserExpr))] -> Maybe (Fip,UserExpr) -> Range -> Range -> Visibility -> String -> (UserCon UserType UserType UserKind, [UserDef])
 makeUserCon con foralls resTp exists pars mbLazyExpr nameRng rng vis doc
@@ -1348,9 +1348,9 @@ pureDecl toplevel dvis
                       (do (rng,doc) <- dockeyword "val" -- return (vis,vrng,rng,doc,inline,True)
                           return (valDecl toplevel (combineRange vrng rng) doc vis inline)
                        <|>
-                       do fip    <- parseTailFip
-                          (rng,doc) <- dockeywordFun  -- return (vis,vrng,rng,doc,inline,False)
-                          return (funDecl toplevel (combineRange vrng rng) doc vis inline fip)
+                       do (fip,frng) <- parseTailFip
+                          (rng,doc)  <- dockeywordFun  -- return (vis,vrng,rng,doc,inline,False)
+                          return (funDecl toplevel (combineRanges [vrng,frng,rng]) doc vis inline fip)
                        <|>
                        do keyword "fn"
                           fail "hint: use 'fun' to start a named function definition (and 'fn' for anonymous functions)")
@@ -1358,42 +1358,42 @@ pureDecl toplevel dvis
        -- valueDecl vrng vis <|> functionDecl vrng vis
        pdecl
 
-parseFipAlloc :: LexParser FipAlloc
+parseFipAlloc :: LexParser (FipAlloc,Range)
 parseFipAlloc
-  = parens (  (do (num,_) <- integer
-                  return (AllocAtMost (fromInteger num)))
-           <|> do _ <- specialId "n"
-                  return AllocFinitely)
-      <|> return (AllocAtMost 0)
+  = parens (  (do (num,rng) <- integer
+                  return (AllocAtMost (fromInteger num),rng))
+           <|> do rng <- specialId "n"
+                  return (AllocFinitely,rng))
+      <|> return (AllocAtMost 0,rangeNull)
 
-parseTailFip :: LexParser Fip
+parseTailFip :: LexParser (Fip,Range)
 parseTailFip
-  = do isTail <- do specialId "tail"
-                    return True
-                 <|> return False
-       parseFipEx isTail
+  = do (isTail,rng)  <-  do rng <- specialId "tail"
+                            return (True,rng)
+                        <|> return (False,rangeNull)
+       parseFipEx rng isTail
 
-parseFip :: LexParser Fip
+parseFip :: LexParser (Fip,Range)
 parseFip
-  = parseFipEx False
+  = parseFipEx rangeNull False
 
-parseFipEx :: Bool -> LexParser Fip
-parseFipEx isTail
-  = do rng <- specialId "fip"
-       alloc <- parseFipAlloc
-       when isTail $ pwarningMessage "a 'fip' function implies already 'tail'" rng
-       return (Fip alloc)
+parseFipEx :: Range -> Bool -> LexParser (Fip,Range)
+parseFipEx rng0 isTail
+  = do rng1 <- specialId "fip"
+       (alloc,rng2) <- parseFipAlloc
+       when isTail $ pwarningMessage "a 'fip' function implies already 'tail'" rng1
+       return (Fip alloc, combineRanges [rng0,rng1,rng2])
   <|>
-    do specialId "fbip"
-       alloc <- parseFipAlloc
-       return (Fbip alloc isTail)
-  <|>  return (NoFip isTail)
+    do rng1 <- specialId "fbip"
+       (alloc,rng2) <- parseFipAlloc
+       return (Fbip alloc isTail, combineRanges [rng0,rng1,rng2])
+  <|>  return (NoFip isTail, rangeNull)
 
 functionDecl toplevel vrng vis
   = do pdecl <- try $ do inline <- parseInline
-                         fip    <- parseTailFip
-                         (rng,doc) <- dockeywordFun
-                         return (funDecl toplevel (combineRange vrng rng) doc vis inline fip)
+                         (fip,rng1) <- parseTailFip
+                         (rng2,doc) <- dockeywordFun
+                         return (funDecl toplevel (combineRanges [vrng,rng1,rng2]) doc vis inline fip)
        pdecl
 
 varDecl
