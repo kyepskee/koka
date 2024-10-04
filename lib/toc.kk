@@ -20,15 +20,15 @@ pub import std/core
 
 pub import std/os/env
 pub import std/os/flags
-pub import std/os/path
 pub import std/os/file
 pub import std/os/dir
+pub import std/os/path
 pub import std/os/process
-pub import std/os/task
 pub import std/os/readline
+pub import std/os/task
 
-pub import std/text/regex
 pub import std/text/parse
+pub import std/text/regex
 pub import std/text/unicode
 
 pub import std/num/int32
