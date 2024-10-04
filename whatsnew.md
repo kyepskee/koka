@@ -11,9 +11,18 @@ generating direct C code without needing a runtime system. To learn more:
 
 * Read the [Koka book][kokabook] for a tour of the Koka language and its specification.
 
-### v3.1.3, 2024
+### v3.1.4, 2024
 
-- Declare reference types as `reference type` (instead of `ref type`).
+- Fix optimized compilation from VS Code (which defaulted to lower optimization before)
+
+- Add applier syntax `.()` where `x.f.(42)` is sugar for `(x.f)(42)` which
+  can be convenient when calling functions selected from a `struct`.
+
+- Improve Windows installation, check clang version and Windows build tools.
+
+- Declare reference types as `reference type` (instead of `ref type`).  
+  All types are by default reference types except for enumerations (all singleton) or 
+  isomorphic types (single constructor with one field, i.e. a `newtype`).
 
 - Declare divergent types as `div type/effect` (instead of `rec type/effect`).
 
