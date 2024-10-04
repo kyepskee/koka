@@ -50,7 +50,7 @@ module Type.Type (-- * Types
                   , isOptional, makeOptionalType, unOptional
                   , typeReuse, typeLocal
 
-                  , tconHandled, tconHandled1
+                  , tconHandled, tconHandled1, wrapHandledFromDataEffect
                   -- , typeCps
                   , isEffectAsync, isAsyncFunction
 
@@ -652,6 +652,14 @@ tconHandled1 = TCon $ TypeCon nameTpHandled1 kind
   where
     kind = kindFun kindHandled1 kindLabel
 
+wrapHandledFromDataEffect :: HasCallStack => DataEffect -> Type -> Type
+wrapHandledFromDataEffect (DataEffect named linear) eff
+  = let name = makeTpHandled named linear
+        kind = kindFun kindHandled kindLabel
+    in TApp (TCon (TypeCon name kind)) [eff]
+wrapHandledFromDataEffect (DataNoEffect) teff
+  = teff
+
 
 isAsyncFunction tp
   = let (_,_,rho) = splitPredType tp
@@ -771,9 +779,8 @@ appEffectExtend :: HasCallStack => Type -> Effect -> Effect
 -- appEffectExtend label eff | isKindHandled (kindOf label)
 --  =  TApp (TCon tconEffectExtend) [TApp tconHandled [label],eff]
 appEffectExtend label eff
-  = assertion ("label has not kind X: " ++ show (label,eff)) (hasKindLabel label)
+  = assertion ("label has not kind X: " ++ show (label,eff,kindOf (expandSyn label))) (hasKindLabel label)
     TApp (TCon tconEffectExtend) [label,eff]
-
   where
     hasKindLabel l
       = let k = kindOf (expandSyn l)

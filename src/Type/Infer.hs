@@ -39,7 +39,7 @@ import Common.NamePrim( nameTpOptional, nameOptional, nameOptionalNone, nameCopy
                       , nameMaskAt, nameMaskBuiltin, nameEvvIndex, nameHTag, nameTpHTag, nameTpEv
                       , nameInternalInt32, nameOr, nameAnd, nameEffectOpen
                       , nameCCtxCreate, nameCCtxHoleCreate, isNameTuple
-                      , nameCoreFileLine, nameCoreFileFile, nameCoreFileModule
+                      , nameCoreFileLine, nameCoreFileFile, nameCoreFileModule, makeTpHandled
                        )
 import Common.Range
 import Common.Unique
@@ -1198,7 +1198,10 @@ inferHandledEffect rng handlerSort mbeff ops
                   Just((opname,rtp):_,_,_) | isHandlerInstance handlerSort && opname == newHiddenName "hname"
                                 -> do -- traceDoc $ \env -> text "effect instance: " <+> ppType env rtp
                                       case rtp of
-                                        TApp (TCon ev) [teff]  | typeConName ev == nameTpEv -> return teff
+                                        TApp (TCon ev) [teff]  | typeConName ev == nameTpEv
+                                           -> do dataInfo <- findDataInfo (getTypeName teff)
+                                                 let effLabel = wrapHandledFromDataEffect (dataInfoEffect dataInfo) teff
+                                                 return effLabel
                                         _  -> failure "Type.Infer.inferHandledEffect: illegal named effect type in operation?"
                   Just(_,eff,_) | not (isHandlerInstance handlerSort)
                                 -> case extractEffectExtend eff of
