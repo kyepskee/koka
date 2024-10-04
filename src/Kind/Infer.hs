@@ -1234,7 +1234,8 @@ resolveTypeDef isRec recNames (DataType newtp params constructors range vis sort
           <- createDataDef emitError emitWarning lookupDataInfo
                 platform qname resultHasKindStar isRec sort extraFields ddef conInfos0
 
-       let docx = memberDoc doc "constructors"
+       let docx = doc -- don't extend the doc with constructors as it is shown when hovering with `ctrl`
+                  {- memberDoc doc "constructors"
                       [ (maybe "" (\fip -> "lazy ") (conInfoLazy con)) ++
                         "con " ++ show (unqualify (conInfoName con)) ++
                         let params = filter (not . isHiddenName . fst) (conInfoParams con)
@@ -1242,7 +1243,7 @@ resolveTypeDef isRec recNames (DataType newtp params constructors range vis sort
                             names = map fst params
                         in if null params then "" else
                             "(" ++ concat (intersperse ", " [show name ++ " : " ++ show tp  | (name,tp) <- zip names tps]) ++ ")"
-                      | con <- conInfos1, not (isHiddenName (conInfoName con))]
+                      | con <- conInfos1, not (isHiddenName (conInfoName con))] -}
            dataInfo = DataInfo sort (getName newtp') (typeBinderKind newtp') typeVars conInfos1 range ddef1 dataEff isRec vis docx
 
        assertion ("Kind.Infer.resolveTypeDef: assuming value struct tag but not inferred as such " ++ show (ddef,ddef1))
@@ -1269,16 +1270,6 @@ resolveTypeDef isRec recNames (DataType newtp params constructors range vis sort
        return (Core.Data dataInfo, concat lazyExprss)
   where
     conVis (UserCon name exist params result mblazy rngName rng vis _) = vis
-
-
-memberDoc :: String -> String -> [String] -> String
-memberDoc doc header []  = doc
-memberDoc doc header members
-  = if null doc then mdoc else doc ++ "\n// * * *\n" ++ mdoc
-  where
-    mdoc = "// " ++ header ++ ":\n// ```koka\n" ++
-           unlines (map ("// "++) members) ++
-           "// ```\n"
 
 
 occursNegativeCon :: [Name] -> ConInfo -> Bool

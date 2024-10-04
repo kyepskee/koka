@@ -32,7 +32,6 @@ module Syntax.Parse( parseProgramFromFile, parseProgramFromString
                    , keyword, dockeyword, docconid
                    , typeDeclKind
                    , paramInfo
-                   , memberDoc
                    ) where
 
 import Lib.Trace
@@ -643,34 +642,11 @@ dataTypeDecl dvis =
       (cs,crng)    <- semiBracesRanged (constructor defvis tpars resTp) <|> return ([],rangeNull)
       let (constrs,creatorss) = unzip cs
           range   = combineRanges [vrng,trng, getRange (tbind kind),prng,crng]
-      let docx = constructorDoc doc constrs
-
-      return (DataType name tpars constrs range vis typeSort ddef DataNoEffect docx, concat creatorss)
+      return (DataType name tpars constrs range vis typeSort ddef DataNoEffect doc, concat creatorss)
    where
     tpVar tb = TpVar (tbinderName tb) (tbinderRange tb)
     tpCon tb = TpCon (tbinderName tb) (tbinderRange tb)
 
-
-constructorDoc :: String -> [UserCon UserType UserType UserKind] -> String
-constructorDoc doc constrs
-  = doc {-
-    memberDoc doc "constructors"
-    [ -- (if isPrivate (userconVis con) then "private " else "") ++
-      (maybe "" (\fip -> "lazy ") (userConLazy con)) ++
-      "con " ++ show (userconName con) ++
-      (if null (userconParams con) then ""
-          else "(" ++ concat (intersperse "," [show (binderName par) | (parvis,par) <- userconParams con]) ++ ")")
-      | con <- constrs ]
-    -}
-
-memberDoc :: String -> String -> [String] -> String
-memberDoc doc header []  = doc
-memberDoc doc header members
-  = if null doc then mdoc else doc ++ "\n// * * *\n" ++ mdoc
-  where
-    mdoc = "// " ++ header ++ ":\n// ```koka\n" ++
-           unlines (map ("// "++) members) ++
-           "// ```\n"
 
 structDecl dvis =
    do (vis,defvis,ddef,vrng,trng,doc) <-
@@ -694,8 +670,7 @@ structDecl dvis =
       let (tid,rng) = getRName name
           conId     = toConstructorName tid
           (usercon,creators) = makeUserCon conId tpars resTp [] pars Nothing rng (combineRange rng prng) defvis doc
-          docx = constructorDoc doc [usercon]
-      return (DataType name tpars [usercon] (combineRanges [vrng,trng,rng,prng]) vis Inductive ddef DataNoEffect docx, creators)
+      return (DataType name tpars [usercon] (combineRanges [vrng,trng,rng,prng]) vis Inductive ddef DataNoEffect doc, creators)
 
 tpVar tb = TpVar (tbinderName tb) (tbinderRange tb)
 tpCon tb = TpCon (tbinderName tb) (tbinderRange tb)
@@ -858,7 +833,8 @@ data OpDecl = OpDecl { opdeclDoc          :: String,
                           opdeclParams       :: [(ValueBinder UserType (Maybe UserExpr))],
                           opdeclParamRange   :: Range,
                           opdeclMbEffectType :: (Maybe UserType),
-                          opdeclResType      ::  UserType
+                          opdeclResType      ::  UserType,
+                          opdeclRange        :: Range
                         }
 
 -- EffectDeclHeader
@@ -879,7 +855,8 @@ data EffectDecl = EffectDecl {
                         effdeclKind       :: UserKind,
                         effdeclParamRange  :: Range,
                         effdeclExtra        :: EffectExtra,
-                        effdeclOpDecls      :: [OpDecl]
+                        effdeclOpDecls      :: [OpDecl],
+                        effdeclRange      :: Range
                     }
 
 data EffectExtra      = EffectExtra   [UserType]  -- extra operation effects besides the regular effect (partial for non-scoped)
@@ -912,17 +889,18 @@ parseEffectDecl dvis =
                                                           else (EffectReplace ([TpCon nameTpPartial irng]++extra)))
                                     -- todo: still need to add TpNamed for the JavaScript backend?
                                     -- return (Just (TpCon nameTpNamed irng))  -- todo: needed only if not using exn?
-         (operations, xrng) <- semiBracesRanged (parseOpDecl singleShot defvis)
+         (operations, oprng) <- semiBracesRanged (parseOpDecl singleShot defvis)
          return $ -- trace ("parsed effect decl " ++ show effectId ++ " " ++ show sort ++ " " ++ show singleShot ++ " " ++ show isInstance ++ " " ++ show tpars ++ " " ++ show kind ++ " " ++ show mbInstance) $
           EffectDecl vis defvis vrng erng doc sort singleShot isInstance isScoped effectId irng
-                           tpars kind prng effectsExtra operations
+                           tpars kind prng effectsExtra operations oprng
       <|>
       do (tpars,kind,prng) <- typeKindParams
          op <- parseOpDecl singleShot vis  -- @(OpDecl (opDoc,opId,krng,idrng,linear,opSort,exists0,pars,prng,mbteff,tres))
          let effectId   = toBasicOperationsName (opdeclName op)
          return $ -- trace ("parsed effect decl " ++ show opId ++ " " ++ show sort ++ " " ++ show singleShot ++ " " ++ show linear ) $
           EffectDecl vis defvis vrng erng doc sort (singleShot || opdeclIsLinear op) False isScoped effectId
-                     (extendRange (opdeclNameRange op) (-1)) tpars kind prng (EffectExtra extra) [op]
+                     (extendRange (opdeclNameRange op) (-1)) tpars kind prng (EffectExtra extra) [op] (opdeclRange op)
+
       )
 
 dockeywordEffect
@@ -941,12 +919,12 @@ makeEffectDecl :: EffectDecl -> [TopDef]
 makeEffectDecl decl =
   let -- todo: use record operations
       (EffectDecl vis defvis vrng erng doc sort singleShot isInstance isScoped
-                    id irng tpars kind prng effectsExtra operations) = decl
+                    id irng tpars kind prng effectsExtra operations oprng) = decl
 
       rng     = combineRanges [vrng,erng,irng]
 
       krng    = rangeHide rng
-      grng    = krng
+      grng    = rangeHide (combineRange rng oprng)
 
       (tparsScoped, tparsNonScoped)
          = if (isScoped)
@@ -978,11 +956,12 @@ makeEffectDecl decl =
 
       -- declare the effect type (for resources, generate a hidden constructor to check the types)
       docEffect  = "effect `:" ++ show id ++ "`\n"
-      docx       = memberDoc doc "operations"
+      docx       = doc  -- don't extend the doc with operations as it is shown when hovering with `ctrl`
+                   {- memberDoc doc "operations"
                     [ show (opdeclSort op) ++ " " ++ show (toBasicOperationsName (opdeclName op)) ++
                       if null (opdeclParams op) && opdeclSort op == OpVal then ""
                        else "(" ++ concat (intersperse "," [show (binderName par) | par <- opdeclParams op ]) ++ ")"
-                    | op <- operations ]
+                    | op <- operations ] -}
 
       {-
       (effTpDecl,wrapAction)
@@ -1118,7 +1097,8 @@ parseValOpDecl vis =
      _ <- case mbteff of
        Nothing  -> return ()
        Just etp -> fail "an explicit effect in result type of an operation is not allowed (yet)"
-     return $ OpDecl doc (toValueOperationName id) rng0 idrng True OpVal [] [] idrng mbteff tres
+     let oprng = combineRanges [rng0,idrng,getRange tres]
+     return $ OpDecl doc (toValueOperationName id) rng0 idrng True OpVal [] [] idrng mbteff tres oprng
 
 parseFunOpDecl :: Bool -> Visibility -> LexParser OpDecl
 parseFunOpDecl linear vis =
@@ -1152,8 +1132,9 @@ parseFunOpDecl linear vis =
         Just etp -> -- TODO: check if declared effect is part of the effect type
                     -- return etp
                     fail "an explicit effect in result type of an operation is not allowed (yet)"
+     let oprng = combineRanges [rng0,idrng,getRange tres]
      return $ -- trace ("parsed operation " ++ show id ++ " : (" ++ show tres ++ ") " ++ show exists0 ++ " " ++ show pars ++ " " ++ show mbteff) $
-              OpDecl doc id rng0 idrng False{-linear-} opSort exists0 pars prng mbteff tres
+              OpDecl doc id rng0 idrng False{-linear-} opSort exists0 pars prng mbteff tres oprng
 
 
 declParams :: Bool -> Bool -> LexParser ([ValueBinder UserType (Maybe UserExpr)],[ParamInfo],Range)
@@ -1186,7 +1167,7 @@ operationDecl opCount vis forallsScoped forallsNonScoped docEffect docEffectDecl
   = let -- teff     = makeEffectExtend rangeNull effTp (makeEffectEmpty rangeNull)
            foralls  = forallsScoped ++ forallsNonScoped
            -- todo: use record operations
-           (OpDecl doc id kwrng idrng linear opSort exists0 pars prng mbteff tres) = op
+           (OpDecl doc id kwrng idrng linear opSort exists0 pars prng mbteff tres oprng) = op
 
            rng      = combineRanges [idrng,prng,getRange tres]
 

@@ -32,7 +32,7 @@ module Common.Syntax( Visibility(..)
                     , platformHasCompressedFields
                     , alignedSum, alignedAdd, alignUp
                     , BuildType(..)
-                    , sepBySpace
+                    , sepBySpace, memberDoc
                     ) where
 
 import Data.List(intersperse)
@@ -465,3 +465,12 @@ fipAllocMax a1 a2
       (_,AllocFinitely)      -> AllocFinitely
       (AllocAtMost n1,AllocAtMost n2) -> AllocAtMost (max n1 n2)
 
+
+memberDoc :: String -> String -> [String] -> String
+memberDoc doc header []  = doc
+memberDoc doc header members
+  = if null doc then mdoc else doc ++ "\n// * * *\n" ++ mdoc
+  where
+    mdoc = "// " ++ header ++ ":\n// ```koka\n" ++
+           unlines (map ("// "++) members) ++
+           "// ```\n"
