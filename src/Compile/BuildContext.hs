@@ -312,21 +312,21 @@ buildcGetMainEntry modname buildc
       _        -> Nothing
 
 -- Build and run a specific main-like entry function, called as `<name>()`
-buildcRunEntry :: Name -> BuildContext -> Build BuildContext
+buildcRunEntry :: Name -> BuildContext -> Build (Maybe (IO ()), BuildContext)
 buildcRunEntry name buildc
   = buildcRunExpr [qualifier name] (show name ++ "()") buildc
 
 -- Build and run an expression with functions visible in the given module names (including private definitions).
 -- Used from the interpreter and IDE.
-buildcRunExpr :: [ModuleName] -> String -> BuildContext -> Build BuildContext
+buildcRunExpr :: [ModuleName] -> String -> BuildContext -> Build (Maybe (IO ()), BuildContext)
 buildcRunExpr importNames expr buildc
   = do (buildc1,mbTpEntry) <- buildcCompileExpr True False importNames expr buildc
-       case mbTpEntry of
-          Just(_,Just (_,run))
-            -> do phase "" (\penv -> empty)
-                  liftIO $ run
-          _ -> return ()
-       return buildc1
+       mbIO <- case mbTpEntry of
+                  Just(_,Just (_,run))
+                    -> -- phase "" (\penv -> empty)
+                       return (Just run)
+                  _ -> return Nothing
+       return (mbIO, buildc1)
 
 -- Compile a function call (called as `<name>()`) and return its type and possible entry point (if `typeCheckOnly` is `False`)
 buildcCompileEntry :: Bool -> Name -> BuildContext -> Build (BuildContext,Maybe (Type, Maybe (FilePath,IO ())))

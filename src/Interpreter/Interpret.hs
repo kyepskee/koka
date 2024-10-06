@@ -276,11 +276,15 @@ loadModulesEx term fl buildc0 files forceAll forceRoots
 
 buildRunExpr :: State -> B.BuildContext -> String -> IO (State,B.BuildContext)
 buildRunExpr st buildc expr
-  = do (mbBuildc,erng) <- B.runBuildIO (terminal st) (flags st) True $ B.buildcLiftErrors id $
+  = do (mbIOBuildc,erng) <- B.runBuildIO (terminal st) (flags st) True $ B.buildcLiftErrors snd $
                           do B.buildcRunExpr [] expr buildc
-       case mbBuildc of
-         Nothing -> return (st{ errorRange = erng }, buildc)
-         Just bc -> return (st{ errorRange = erng }, bc)
+       case mbIOBuildc of
+         Nothing         -> return (st{ errorRange = erng }, buildc)
+         Just (mbRun,bc) -> do case mbRun of
+                                 Just run -> do messageLn st ""
+                                                run
+                                 Nothing  -> return ()
+                               return (st{ errorRange = erng }, bc)
 
 
 buildTypeExpr :: State -> B.BuildContext -> String -> IO (Maybe Type,State,B.BuildContext)
