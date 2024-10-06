@@ -211,7 +211,11 @@ synCopyCon modName info con
 
         argName  = newName "@this"
 
-        params = [ValueBinder name Nothing (if not (hasAccessor name t con) then Nothing else (Just (app (var name) [var argName]))) rc rc| (name,t) <- conInfoParams con]
+        params = [ValueBinder fldName Nothing
+                  (if not (hasAccessor fldName t con)
+                     then Nothing
+                     else (Just (app (var (typeQualifiedNameOf (dataInfoName info) fldName)) [var argName]))) rc rc
+                 | (fldName,t) <- conInfoParams con]
         expr = Lam ([ValueBinder argName Nothing Nothing rc rc] ++ params) body rc
         body = app (var (conInfoName con)) [var name | (name,tp) <- conInfoParams con]
         def  = DefNonRec (Def (ValueBinder defName () (Ann expr fullTp rc) rc rc) rc (dataInfoVis info) (defFun []) InlineAuto "")
@@ -242,12 +246,14 @@ synAccessors modName info
         synAccessor :: (Name,(Type,Range,Visibility,ConInfo)) -> DefGroup Type
         synAccessor (name,(tp,xrng,visibility,cinfo))
           = let rng      = rangeHide xrng
-                dataName = unqualify $ dataInfoName info
-                defName  = qualifyLocally (nameAsModuleName dataName) name -- TODO: only for type names that are valid module names!
 
-                arg = if (all isAlphaNum (show dataName))
-                       then dataName else newName "@this"
-                fld = newName "@x"
+                -- dataName = unqualify $ dataInfoName info
+                -- defName  = qualifyLocally (nameAsModuleName dataName) name -- TODO: only for type names that are valid module names!
+                defName = unqualify $ typeQualifiedNameOf (dataInfoName info) name
+                -- arg = newHiddenName "self"
+                arg = let dataName = unqualify (dataInfoName info)
+                      in if (all isAlphaNum (show dataName)) then dataName else newName "@this"
+                fld = newHiddenName "x"
 
                 dataTp = typeApp (TCon (TypeCon (dataInfoName info) (dataInfoKind info))) (map TVar (dataInfoParams info))
                 fullTp = let (foralls,preds,rho) = splitPredType tp
@@ -287,7 +293,7 @@ synTester info con | isHiddenName (conInfoName con) || conInfoIsLazy con
   = []
 synTester info con
   = let name = (prepend "is-" (toVarName (unqualify (conInfoName con))))
-        arg = unqualify $ dataInfoName info
+        arg = unqualify $ dataInfoName info -- newHiddenName "self"
         rc  = rangeHide (conInfoRange con)
 
         expr      = Lam [ValueBinder arg Nothing Nothing rc rc] caseExpr rc

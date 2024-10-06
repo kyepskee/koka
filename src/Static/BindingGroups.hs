@@ -98,11 +98,12 @@ groupBindings modName defGroups
     group defs deps
   where
     (defs, deps0) = unzipWith (concat, unions) (map (bindingsDefGroup modName) defGroups)
-    deps          = M.map extend deps0
-    extend ndeps  = ndeps `S.union` (S.fromList (concatMap extendName (S.toList ndeps)))
-    extendName n  = case M.lookup (unqualifyFull n) extraDefs of
-                      Just extra -> extra
-                      Nothing    -> []
+    deps          = M.mapWithKey extend deps0
+    extend defName ndeps  = ndeps `S.union` (S.fromList (concatMap (extendName defName) (S.toList ndeps)))
+    extendName defName n  = case M.lookup (unqualify n) extraDefs of
+                              Just extra -> -- trace (" groupBindings: " ++ show defName ++ ": add extra defs: " ++ show n ++ " -> " ++ show extra) $
+                                            extra
+                              Nothing    -> []
     extraDefs     = extractDefGroups defGroups
 
     defGroupNames (DefNonRec def) = [defName def]
@@ -399,8 +400,8 @@ group defs deps
                            _    -> [DefRec [def | id <- ids, def <- M.find id defMap]]
         finalGroup     = concatMap makeGroup defOrder
     in -- trace ("groups:\n"
-    --            ++ unlines [show (defName def) ++ ": line " ++ show (posLine (rangeStart (defRange def))) ++ ": " ++ show defdeps | (def,defdeps) <- defDepsList]
-    --            ++ "\ninitial order: " ++ show defOrderScc ++ "\n\nfinal order: " ++ show defOrder) $
+              -- ++ unlines [show (defName def) ++ ": line " ++ show (posLine (rangeStart (defRange def))) ++ ": " ++ show defdeps | (def,defdeps) <- defDepsList]
+              -- ++ "\ninitial order: " ++ show defOrderScc ++ "\n\nfinal order: " ++ show defOrder) $
        finalGroup
 
 
