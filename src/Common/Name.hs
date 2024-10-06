@@ -145,9 +145,9 @@ isSameNamespace name1 name2
   = (isConstructorName name1 == isConstructorName name2)
 
 lowerCompare (Name m1 _ l1 _ n1 _) (Name m2 _ l2 _ n2 _)
-  = case lowerCompareS n1 n2 of
+  = case lowerCompareS m1 m2 of
       EQ -> case lowerCompareS l1 l2 of
-              EQ -> lowerCompareS m1 m2
+              EQ -> lowerCompareS n1 n2
               lg -> lg
       lg -> lg
 
