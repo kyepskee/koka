@@ -1055,6 +1055,11 @@ ppAmbDocs docs
 -- Implicit arguments
 -----------------------------------------------------------------------
 
+-- If true, we just prefer a shortest (unique) chain.
+-- If false, we prefer the shortest chain ending with the most locals (which may be harder on the search space)
+preferShortestChain :: Bool
+preferShortestChain = True
+
 -- A resolved implicit argument is always a name together with a list of further
 -- implicit arguments (in case it is a function itself)
 data ImplicitArg   = ImplicitArg{ iaName :: Name
@@ -1070,7 +1075,7 @@ data Partial   = Step  (Inf [ImplicitArg])  -- compute on demand
 
 
 -- An implicit argument has a cost where we prefer the least solution when disambiguating
--- (that is: most locals, minimal call depth)
+-- (that is, depending on `preferShortestChain`, either minimal call depth, or, most locals with minimal call depth)
 data Cost  = Least Int    -- if an implicit argument is not yet fully computed, we can only give a least score
            | Exact Int    -- and otherwise it is exact
 
@@ -1106,10 +1111,15 @@ isDone (ImplicitArg _ _ _ iargs)
         ) iargs
 
 
--- cost: chain depth + 100*#qualified leaf name (while locals cost zero)
+-- cost:
+-- if preferShortestChain
+--   then: chain depth + #qualified-names  (while locals cost zero)
+--   else: chain depth + #qualified-non-leaf-names + 100*#qualified-leaf-names (while locals cost zero)
 implicitArgCost :: ImplicitArg -> Cost
 implicitArgCost iarg
-  = let base = if isQualified (iaName iarg) then (if null (iaImplicitArgs iarg) then 100 else 1) else 0
+  = let base = if isQualified (iaName iarg)
+                 then (if not (null (iaImplicitArgs iarg) || preferShortestChain) then 1 else 100)
+                 else 0
     in cadd (Exact base) (csum (map (partialCost . snd) (iaImplicitArgs iarg)))
 
 partialCost :: Partial -> Cost
