@@ -132,12 +132,11 @@ fun int/compare( x : int, y : int ) : order
 // We can now choose to resolve `?eq` either as `int/eq`, or `compare/eq(_,_,?compare=?int/compare)`
 // The compiler disambiguates always using the _shortest chain_ (i.e. `int/eq`)
 fun example7()
-  eq([1,2],[1,2])       // eq=list/eq(_,_,int/eq)
+  eq([1,2],[1,2])       // `list/eq(_,_,int/eq)`
 
-// However, any conversion chain ending in (the most) local parameters still takes precedence.
-// (so the full disambiguation rule is _most locals_, _shortest chain_)
-fun test1(?compare)
-  eq([1,2],[1,2])       // eq=compare/eq(_,_,?compare=?compare)
+// and with equal length call chains, the one using _most locals_ is preferred:
+fun example7a(?compare)
+  eq([1,2],[1,2])       // `compare/eq(_,_,?compare=?compare)` (and not `list/eq(_,_,int/eq)`)
 
 
 // Sometimes we need multiple implicit parameters resolving to the same name.
@@ -153,7 +152,7 @@ fun tuple/eq2( (x1,y1), (x2,y2), ?a/eq, ?b/eq ) : bool
 
 // As we can see, implicit parameters can really help reduce boilerplate!
 fun example8()
-  eq(([1],"a"),([1],"a"))   // `?a/eq=list/eq(_,_,int/eq),?b/eq=compare/eq(_,_,string/compare)`
+  eq(([1],"a"),([1],"a"))   // `tuple/eq(_,_,?a/eq=list/eq(_,_,int/eq),?b/eq=compare/eq(_,_,string/compare))`
 
 pub fun main()
   example8().println

@@ -47,8 +47,9 @@ fun list/cmpx<a>( xs : list<a>, ys : list<a>, ?cmpx : (a,a) -> order ) : order
 // If we add `cmpx/eq` we get ambiguities. e.g. `eq(1,2)`
 // can be resolved as `eq = int/eq` but also with `eq = cmpx/eq(int/cmpx)`
 // We cannot just prefer values, since `eq([1],[2])`
-// can be resolved as `eq = list/eq(int/eq)` but also as `eq = cmpx/eq(list/cmpx(int/cmpx))`.
-// For implicits we instead prefer shortest chains originating from the most locals.
+// can be resolved as `eq = list/eq(_,_,int/eq)` but also as `eq = cmpx/eq(_,_,list/cmpx(int/cmpx))`.
+// For implicits we instead prefer the _shortest chain_ (with the most locals). (A)
+// (before we preferred most locals first, and then the shortest chain (B))
 fun cmpx/eq( x : a, y : a, ?cmpx : (a,a) -> order ) : bool
   cmpx(x,y) == Eq
 
@@ -60,7 +61,8 @@ fun test3b()
   equal(1,2)  // use `int/eq` instead of `cmpx/eq(int/cmpx)` as it is shorter
 
 fun test3c(?cmpx : (int,int) -> order)
-  equal(1,2)  // use `cmpx/eq(_,_,?cmpx)` (instead of `int/eq`) as it originates with the most locals
+  equal(1,2)  // (A) use `int/eq` as it is shortest.
+              // (B) use `cmpx/eq(_,_,?cmpx)` (instead of `int/eq`) as it originates with the most locals
 
 fun test3d(?cmpx : (int,int) -> order)
   fun eq(x,y) cmpx/eq(x,y)   // use `?cmpx`
@@ -68,13 +70,15 @@ fun test3d(?cmpx : (int,int) -> order)
 
 
 fun test4a(x : int, y :int, ?cmpx : (int,int) -> order)
-  (equal(1,2)  // use `cmpx/eq(?cmpx)` (instead of `int/eq`) to prefer implicits originating from the local declarations (instead of the global `int/eq`)
-  ,equal('a','b')  // use `char/eq` since `cmpx/eq(?cmpx)` does not type check
+  (equal(1,2)  // (A) use `int/eq` as it is shortest
+               // (B) use `cmpx/eq(?cmpx)` (instead of `int/eq`) to prefer implicits originating from the local declarations (instead of the global `int/eq`)
+  ,equal('a','b')  // use `char/eq` ((B): since `cmpx/eq(?cmpx)` does not type check)
   ,cmpx(x,y))
 
 fun test4b(x : int, y :int)
   val cmpx = int/cmpx
-  (equal(x,y)  // use `cmpx/eq(cmpx)` to prefer implicits originating from the local declarations (instead of the global `int/eq`)
+  (equal(x,y)  // (A) use `int/eq`
+               // (B) use `cmpx/eq(cmpx)` to prefer implicits originating from the local declarations (instead of the global `int/eq`)
   ,cmpx(x,y))
 
 fun show( ord : order ) : string
