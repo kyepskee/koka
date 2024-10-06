@@ -147,7 +147,9 @@ compileEntry buildc entry
        buildcThrowOnError buildc'
        case mbTpEntry of
          Just(_,Just(_,run)) -> return run
-         _                   -> do addErrorMessageKind ErrBuild (\penv -> text "unable to find main entry point" <+> ppName penv entry)
+         _                   -> do flags <- buildcFlags
+                                   when (null (mainEntryName flags)) $
+                                     addErrorMessageKind ErrBuild (\penv -> text "unable to find main entry point" <+> ppName penv entry)
                                    return (return ())
 
 

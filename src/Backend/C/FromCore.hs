@@ -68,10 +68,10 @@ externalNames
 -- Generate C code from System-F core language
 --------------------------------------------------------------------------
 
-cFromCore :: Bool -> CTarget -> BuildType -> FilePath -> Pretty.Env -> Platform -> Newtypes -> Borrowed -> Int -> Bool -> Bool -> Bool -> Bool -> Bool -> Int -> Maybe (Name,Bool) -> Core -> (Doc,Doc,Maybe Doc,Core)
-cFromCore separateMain ctarget buildType sourceDir penv0 platform newtypes borrowed uniq enableReuse enableSpecialize enableReuseSpecialize enableBorrowInference eagerPatBind stackSize mbMain core
+cFromCore :: Bool -> CTarget -> BuildType -> FilePath -> Pretty.Env -> Platform -> Newtypes -> Borrowed -> Int -> Bool -> Bool -> Bool -> Bool -> Bool -> Int -> Maybe (Name,Bool) -> String -> Core -> (Doc,Doc,Maybe Doc,Core)
+cFromCore separateMain ctarget buildType sourceDir penv0 platform newtypes borrowed uniq enableReuse enableSpecialize enableReuseSpecialize enableBorrowInference eagerPatBind stackSize mbMain mainName core
   = case runAsm uniq (Env moduleName moduleName False penv externalNames newtypes platform eagerPatBind)
-           (genModule separateMain ctarget buildType sourceDir penv platform newtypes borrowed enableReuse enableSpecialize enableReuseSpecialize enableBorrowInference stackSize mbMain core) of
+           (genModule separateMain ctarget buildType sourceDir penv platform newtypes borrowed enableReuse enableSpecialize enableReuseSpecialize enableBorrowInference stackSize mbMain mainName core) of
       ((bcore,mainDoc),cdoc,hdoc) -> (cdoc,hdoc,mainDoc,bcore)
   where
     moduleName = coreProgName core
@@ -83,8 +83,8 @@ contextDoc = text "_ctx"
 contextParam :: Doc
 contextParam = text "kk_context_t* _ctx"
 
-genModule :: Bool -> CTarget -> BuildType -> FilePath -> Pretty.Env -> Platform -> Newtypes -> Borrowed -> Bool -> Bool -> Bool -> Bool -> Int -> Maybe (Name,Bool) -> Core -> Asm (Core,Maybe Doc)
-genModule separateMain ctarget buildType sourceDir penv platform newtypes borrowed0 enableReuse enableSpecialize enableReuseSpecialize enableBorrowInference stackSize mbMain core0
+genModule :: Bool -> CTarget -> BuildType -> FilePath -> Pretty.Env -> Platform -> Newtypes -> Borrowed -> Bool -> Bool -> Bool -> Bool -> Int -> Maybe (Name,Bool) -> String -> Core -> Asm (Core,Maybe Doc)
+genModule separateMain ctarget buildType sourceDir penv platform newtypes borrowed0 enableReuse enableSpecialize enableReuseSpecialize enableBorrowInference stackSize mbMain mainName core0
   =  do core <- liftUnique (do bcore <- boxCore core0            -- box/unbox transform
                                let borrowed = borrowedExtendICore bcore borrowed0
                                pcore <- parcCore penv platform newtypes borrowed enableSpecialize bcore -- precise automatic reference counting
@@ -148,6 +148,7 @@ genModule separateMain ctarget buildType sourceDir penv platform newtypes borrow
 
         let mainDoc = genMain (if separateMain then [headComment,currentModuleInclude] else [])
                               (coreProgName core) platform stackSize mbMain
+                              (if null mainName then "main" else mainName)
         case mainDoc of
           Just doc | not separateMain -> emitToC doc
           _        -> return ()
@@ -224,27 +225,47 @@ importExternalInclude ctarget buildType sourceDir ext
       _ -> []
 
 
-genMain :: [Doc] -> Name -> Platform -> Int -> Maybe (Name,Bool) -> Maybe Doc
-genMain header progName platform stackSize Nothing = Nothing
-genMain header progName platform stackSize (Just (name,_))
+genMain :: [Doc] -> Name -> Platform -> Int -> Maybe (Name,Bool) -> String -> Maybe Doc
+genMain header progName platform stackSize Nothing mainName = Nothing
+genMain header progName platform stackSize (Just (name,_)) mainName
   = Just $ vcat $ header ++
-    [ text "\n// main exit\nstatic void _kk_main_exit(void)" <+> block (vcat [
+    [ text "\n// main library entry points", mainInit, mainRun, mainDone] ++
+    [ text "\nstatic void" <+> mainAtExitName <.> text "(void)" <+> block (vcat [
             text "kk_context_t* _ctx = kk_get_context();",
-            ppName (qualify progName (newName "@done")) <.> parens (text "_ctx") <.> semi
+            ctxcall mainDoneName
           ])
-    , text "\n// main entry\nint main(int argc, char** argv)" <+> block (vcat [
+    , text "\n// main program entry point"
+    , text "// `kk_main_start`/`kk_main_end` are only called for passing command line arguments and process timing"
+    , text "// (`kk_get_context()` can be used to get a context without calling `kk_main_start`)"
+    , text "int" <+> text mainName <.> text "(int argc, char** argv)" <+> block (vcat [
         text $ "kk_assert(sizeof(size_t)==" ++ show (sizeSize platform) ++ " && sizeof(void*)==" ++ show (sizePtr platform) ++ ");"
       , if stackSize == 0 then empty else
         text $ "kk_os_set_stack_size(KK_IZ(" ++ show stackSize ++ "));"
       , text "kk_context_t* _ctx = kk_main_start(argc, argv);"
-      , ppName (qualify progName (newName "@init")) <.> parens (text "_ctx") <.> semi
-      , text "atexit(&_kk_main_exit);"
-      , ppName name <.> parens (text "_ctx") <.> semi
-      , ppName (qualify progName (newName "@done")) <.> parens (text "_ctx") <.> semi
-      , text "kk_main_end(_ctx);"
+      , ctxcall mainInitName <+> text "atexit" <.> parens (text "&" <.> mainAtExitName) <.> semi
+      , ctxcall mainRunName
+      , ctxcall mainDoneName <+> text "kk_main_end(_ctx);"
       , text "return 0;"
       ])
     ]
+  where
+    mainDoneName = text (mainName ++ "_done")
+    mainInitName = text (mainName ++ "_init")
+    mainRunName  = text (mainName ++ "_run")
+    mainAtExitName = text (mainName ++ "_at_exit")
+
+    mainInit
+      = text "void" <+> mainInitName <.> parens (text "kk_context_t* _ctx") <+> block (progcall "init")
+    mainRun
+      = text "void" <+> mainRunName <.> parens (text "kk_context_t* _ctx") <+> block (ctxcall (ppName name))
+    mainDone
+      = text "void" <+> mainDoneName <.> parens (text "kk_context_t* _ctx") <+> block (progcall "done")
+
+    progcall name
+      = ctxcall $ ppName (qualify progName (newName ("@" ++ name)))
+    ctxcall name
+      = name <.> parens (text "_ctx") <.> semi
+
 
 ---------------------------------------------------------------------------------
 -- Generate C statements for value definitions

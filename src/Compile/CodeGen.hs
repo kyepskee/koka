@@ -286,7 +286,8 @@ codeGenC sourceFile newtypes borrowed0 unique0 term flags sequential entry outBa
           (cdoc,hdoc,_,bcore) = cFromCore False
                                           ctarget (buildType flags) sourceDir (prettyEnvFromFlags flags) (platform flags)
                                           newtypes borrowed0 unique0 (parcReuse flags) (parcSpecialize flags) (parcReuseSpec flags)
-                                          (parcBorrowInference flags) (optEagerPatBind flags) (stackSize flags) mbEntry core0
+                                          (parcBorrowInference flags) (optEagerPatBind flags) (stackSize flags) mbEntry (mainEntryName flags)
+                                          core0
           bcoreDoc  = Core.Pretty.prettyCore (prettyEnvFromFlags flags){ coreIface = False, coreShowDef = True } (C CDefault) [] bcore
 
       -- writeDocW 120 (outBase ++ ".c.kkc") bcoreDoc
@@ -353,6 +354,13 @@ codeGenLinkC term flags sequential cc progName imported outBase clibs
                         then 1024*1024*1024 -- default to 1Gb on wasi
                         else heapSize flags
 
+            linkFlags = [ ccFlagsLink cc
+                        , ccFlagStack cc stksize
+                        , ccFlagHeap cc hpsize]
+
+            linkLibs  = map (ccAddLib cc) libpaths  -- libs
+                        ++ map (ccAddSysLib cc) syslibs
+
             clink  = concat $
                       [ [ccPath cc]
                       , ccFlags cc
@@ -360,17 +368,29 @@ codeGenLinkC term flags sequential cc progName imported outBase clibs
                       , ccTargetExe cc mainExe
                       ]
                       ++ [objs]
-                      ++ [ccFlagsLink cc]  -- must be last due to msvc
-                      ++ [ccFlagStack cc stksize,ccFlagHeap cc hpsize]
+                      ++ linkFlags  -- must be last due to msvc
                       -- ++ [ccAddLibraryDir cc (fullBuildDir flags)]
-                      ++ map (ccAddLib cc) libpaths  -- libs
-                      ++ map (ccAddSysLib cc) syslibs
+                      ++ linkLibs
 
 
         -- link
-        -- termPhase term (color (colorInterpreter (colorScheme flags)) (text "linking:") <+>
-        --                   color (colorSource (colorScheme flags)) (text mainName))
-        runCommand term flags clink
+        let termShow pre post
+              = termInfo term (color (colorInterpreter (colorScheme flags)) (fill 14 (text pre) <.> colon) <+>
+                                color (colorSource (colorScheme flags)) (text (unwords post)))
+        if (not (null (mainEntryName flags)))
+          then do -- todo: properly create an archive
+                  termShow "link command"     ([ccPath cc] ++ ccFlags cc)
+                  termShow "link objects"     objs
+                  termShow "link flags"       (concat linkFlags)
+                  termShow "link libraries"   (concat linkLibs)
+                  termShow "link target"      [mainExe ++ exeExtension]
+                  return LinkDone
+          else do codeGenLinkExe term flags stksize clink mainExe
+
+
+codeGenLinkExe :: Terminal -> Flags -> Int -> [String] -> [Char] -> IO LinkResult
+codeGenLinkExe term flags stksize clink mainExe
+  = do  runCommand term flags clink
 
         -- return command line to execute
         let mainTarget = mainExe ++ targetExeExtension (target flags)
@@ -394,6 +414,7 @@ codeGenLinkC term flags sequential cc progName imported outBase clibs
                           (runCommand term flags [node flags,"--stack-size=" ++ show nodeStack,mainTarget]))
           _ -> do let cmd = dquote mainExe ++ cmdflags ++ " " ++ execOpts flags
                   seqString cmd $ return (LinkExe mainTarget (runSystemEcho term flags cmd)) -- use shell for proper rss accounting
+
 
 
 -- Run the C compiler

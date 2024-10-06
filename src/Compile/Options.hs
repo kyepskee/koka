@@ -214,6 +214,7 @@ data Flags
          , maxConcurrency   :: !Int
          , maxErrors        :: !Int
          , useBuildDirHash  :: !Bool
+         , mainEntryName    :: !String
          , baseFlags        :: Maybe Flags
          } deriving (Eq,Show)
 
@@ -259,7 +260,8 @@ instance Hashable Flags where
           show $ parcBorrowInference flags,
           show $ asan flags,
           show $ useStdAlloc flags,
-          show $ optSpecialize flags
+          show $ optSpecialize flags,
+          show $ mainEntryName flags
         ]
 
 flagsHash :: Flags -> String
@@ -368,6 +370,7 @@ flagsNull
           16    -- max concurrency
           25    -- max errors
           True  -- use variant hash
+          "main"  -- main entry name
           Nothing -- no base flags
 
 isHelp Help = True
@@ -438,6 +441,7 @@ options = (\(xss,yss) -> (concat xss, concat yss)) $ unzip
  , option []    ["editor"]          (ReqArg editorFlag "cmd")       "use <cmd> as editor"
  , option []    ["stack"]           (ReqArg stackFlag "size")       "set stack size (0 for platform default)"
  , option []    ["heap"]            (ReqArg heapFlag "size")        "set reserved heap size (0 for platform default)"
+ , option []    ["mainentry"]       (ReqArg mainEntry "name")       "set the name of the main entry function ('main')"
  , option []    ["color"]           (ReqArg colorFlag "colors")     "set colors"
  , option []    ["redirect"]        (ReqArg redirectFlag "file")    "redirect output to <file>"
  , configstr [] ["console"]  ["ansi","html","raw"] "fmt" (\s f -> f{ console = s }) "console output format: <ansi|html|raw>"
@@ -580,6 +584,9 @@ options = (\(xss,yss) -> (concat xss, concat yss)) $ unzip
 
   ccFlag s
     = Flag (\f -> f{ ccompPath = s })
+
+  mainEntry s
+    = Flag (\f -> f{ mainEntryName = s })
 
   extendArgs prev mbs
     = case mbs of Just s | not (null s) -> prev ++ unquote s
