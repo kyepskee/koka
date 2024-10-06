@@ -370,7 +370,7 @@ flagsNull
           16    -- max concurrency
           25    -- max errors
           True  -- use variant hash
-          "main"  -- main entry name
+          ""      -- main entry name (null for default for each target)
           Nothing -- no base flags
 
 isHelp Help = True

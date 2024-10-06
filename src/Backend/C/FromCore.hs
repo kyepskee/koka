@@ -147,8 +147,7 @@ genModule separateMain ctarget buildType sourceDir penv platform newtypes borrow
                   <.> block done
 
         let mainDoc = genMain (if separateMain then [headComment,currentModuleInclude] else [])
-                              (coreProgName core) platform stackSize mbMain
-                              (if null mainName then "main" else mainName)
+                              (coreProgName core) platform stackSize mbMain mainName
         case mainDoc of
           Just doc | not separateMain -> emitToC doc
           _        -> return ()

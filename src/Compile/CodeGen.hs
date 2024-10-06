@@ -286,7 +286,8 @@ codeGenC sourceFile newtypes borrowed0 unique0 term flags sequential entry outBa
           (cdoc,hdoc,_,bcore) = cFromCore False
                                           ctarget (buildType flags) sourceDir (prettyEnvFromFlags flags) (platform flags)
                                           newtypes borrowed0 unique0 (parcReuse flags) (parcSpecialize flags) (parcReuseSpec flags)
-                                          (parcBorrowInference flags) (optEagerPatBind flags) (stackSize flags) mbEntry (mainEntryName flags)
+                                          (parcBorrowInference flags) (optEagerPatBind flags) (stackSize flags) mbEntry
+                                          (if null (mainEntryName flags) then "main" else mainEntryName flags)
                                           core0
           bcoreDoc  = Core.Pretty.prettyCore (prettyEnvFromFlags flags){ coreIface = False, coreShowDef = True } (C CDefault) [] bcore
 
