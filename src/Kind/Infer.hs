@@ -547,7 +547,7 @@ lazyFip info
 
 lazyName :: DataInfo -> String -> Name
 lazyName info stem
-  = typeQualifiedName (dataInfoName info) stem
+  = unqualify $ typeQualifiedName (dataInfoName info) stem
     -- let dataName = unqualify $ dataInfoName info
     -- in qualifyLocally (nameAsModuleName dataName) (newName stem)
 
