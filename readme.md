@@ -193,7 +193,7 @@ on Windows the default prefix is `%LOCALAPPDATA%\koka`.
 
 It is also possible to generate installation packages for
 various Linux platforms (RHEL, Debian, Alpine, etc.). See
-the [readme][util/packaging] for further information.
+the [readme](util/packaging) for further information.
 
 # Benchmarks
 
