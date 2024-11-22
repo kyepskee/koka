@@ -1,6 +1,8 @@
 // Used for external interfaces
 module std/os/null
 
+import std/os/maybe
+
 // Abstract type used for passing `null` values to external functions
 pub type null<a>
 
