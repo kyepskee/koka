@@ -72,7 +72,9 @@ runWithLSArgs runLanguageServer args
                    else if (console flags == "ansi")
                     then withColorPrinter
                     else withNoColorPrinter (if (languageServerStdio flags) then stderr else stdout)
-       with (mainMode runLanguageServer flags mode)
+       runs <- with (mainMode runLanguageServer flags mode)
+       when (evaluate flags) $ 
+         sequence_ runs
     `catchIO` \err ->
     do if ("ExitFailure" `isPrefix` err)
         then return ()
@@ -81,27 +83,32 @@ runWithLSArgs runLanguageServer args
   where
     isPrefix s t  = (s == take (length s) t)
 
+type Runs = [IO ()]
+
 -- The main mode determines what the compiler should be doing
-mainMode :: (ColorPrinter -> Flags -> [FilePath] -> IO ()) -> Flags -> Mode -> ColorPrinter -> IO ()
+mainMode :: (ColorPrinter -> Flags -> [FilePath] -> IO ()) -> Flags -> Mode -> ColorPrinter -> IO Runs
 mainMode runLanguageServer flags mode p
   = case mode of
      ModeHelp
-      -> showHelp flags p
+      -> fmap (const []) $ showHelp flags p
      ModeVersion
-      -> withNoColorPrinter stdout (\monop -> showVersion flags monop)
+      -> fmap (const []) $ withNoColorPrinter stdout (\monop -> showVersion flags monop)
      ModeCompiler files
       -> do ok <- compileAll p flags files
-            when (not ok) $
-              do hPutStrLn stderr ("Failed to compile " ++ concat (intersperse "," files))
-                 exitFailure
+            case ok of
+                Just runs ->
+                    return runs
+                Nothing ->
+                    do hPutStrLn stderr ("Failed to compile " ++ concat (intersperse "," files))
+                       exitFailure
      ModeInteractive files
-      -> interpret p flags files
+      -> fmap (const []) $ interpret p flags files
      ModeLanguageServer files
-      -> runLanguageServer p flags files
+      -> fmap (const []) $ runLanguageServer p flags files
 
 
 -- Compile (and/or link and/or evaluate) argument files
-compileAll :: ColorPrinter -> Flags -> [FilePath] -> IO Bool
+compileAll :: ColorPrinter -> Flags -> [FilePath] -> IO (Maybe Runs)
 compileAll p flags fpaths
   = do cwd <- getCwd
        (mbRuns,_) <- -- run the build monad with a terminal and flags
@@ -119,10 +126,7 @@ compileAll p flags fpaths
                           mapM_ (compileShowInfo buildc) roots
                           buildcFlushErrors buildc -- for warnings
                           return runs
-       case mbRuns of
-         Just runs -> do when (evaluate flags) $ sequence_ runs
-                         return True
-         Nothing   -> return False
+       return mbRuns
   where
     -- all output should go via the terminal
     term cwd
